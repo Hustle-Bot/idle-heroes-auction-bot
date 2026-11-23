@@ -132,8 +132,8 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.IH_KEYSTORE_BASE64 }}
           KS_PASS: ${{ secrets.IH_KEYSTORE_PASSWORD }}
           # SHA-256 of the project's release certificate (also in SECURITY.md). Every release must carry it.
-          # Empty until the maintainers created the release key: then no release can be made.
-          ZERTIFIKAT: ""
+          # Set on 23.11.2026 when the release key was created (on the maintainer's PC, never in the repo).
+          ZERTIFIKAT: "d947bdb75105561b8af631ddd039a965ec63c9659e275d41528e3f157e67a440"
         run: |
           if [ -z "$ZERTIFIKAT" ]; then
             echo "::error::The release certificate digest (ZERTIFIKAT) is not set in build.yml yet"
