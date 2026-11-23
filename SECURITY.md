@@ -114,7 +114,7 @@ the battery-optimization and Do Not Disturb checks only read the current state.
   **Only APKs from this repository's Releases with this signing certificate are the public build:**
 
   ```
-  SHA-256 digest: cd6129b55f0ea5821abeb3b6eca719aba874dccf5fba2d9e798a42cd0ee290f5
+  SHA-256 digest: (published here and in the release notes with the first release)
   DN: CN=Idle Heroes Auction Bot, O=Open Source
   ```
 
