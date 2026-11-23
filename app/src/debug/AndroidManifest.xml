@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ONLY in the test build type (debug): control via adb for the emulator test. Not in any release build.
+     Review before publishing (Nov 22): only senders with the DUMP permission (the adb shell has it, normal apps
+     do not) may use it. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name="io.github.hustlebot.ihauctionbot.app.TestSteuerung"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="${applicationId}.TEST_EINSTELLEN" />
+                <action android:name="${applicationId}.TEST_START" />
+                <action android:name="${applicationId}.TEST_STOPP" />
+                <action android:name="${applicationId}.TEST_TASCHE" />
+                <action android:name="${applicationId}.TEST_NOTAUS" />
+                <action android:name="${applicationId}.TEST_STATUS" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This app ("oss"): no internet, no self-update, no screen recording. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- The app itself never goes online. Libraries (Google ML Kit's usage logging) would add INTERNET – removed here.
+         The text recognition (only if the player turns it on) runs through Google Play services, which download the
+         model themselves. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+
+    <application>
+        <!-- Sharing a report: read-only access for the app the player picks, only to the one ZIP file in
+             cache/geteilt/ (res/xml/berichte_teilen.xml). Not exported. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.berichte"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/berichte_teilen" />
+        </provider>
+    </application>
+</manifest>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only files the FileProvider may hand out: the report ZIP prepared for sharing (cache/geteilt/). -->
+<paths>
+    <cache-path name="berichte" path="geteilt/" />
+</paths>

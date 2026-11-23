@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- canRetrieveWindowContent + flagRetrieveInteractiveWindows, so that the app finds the
+     input field (price fields in the filter, secondary password) and can write text into it,
+     and can see which app is in front (window list).
+     Review before publishing (Nov 22):
+     - packageNames: events only from Idle Heroes (Google Play: com.droidhang.ad). It is also the allow-list: the app
+       types only into this app and keeps screenshots only while it is in front. The debug build has its own copy with
+       the fake game (src/debug/res/xml/bedienungshilfe.xml).
+     - Emergency stop: canRequestFilterKeyEvents is the capability only. The app switches flagRequestFilterKeyEvents on
+       (setServiceInfo) only while a run is active, and only looks at the two volume keys. It never swallows a key.
+     Review round 2 (Nov 23):
+     - Which app is in front comes from the window list alone (kind, id, layer, size): the game's windows are known from
+       the game's own events, no other app's window content is read. Only the game's windows are read (text input).
+     - isAccessibilityTool="false": this is not a tool for people with disabilities (said explicitly). -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRequestFilterKeyEvents="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/dienst_beschreibung"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="100"
+    android:packageNames="com.droidhang.ad" />

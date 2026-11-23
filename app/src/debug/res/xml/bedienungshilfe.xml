@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ONLY in the test build type (debug): the same as src/main/res/xml/bedienungshilfe.xml, plus the fake game
+     (io.github.hustlebot.ihauctionbot.attrappe) in packageNames – the allow-list – for the emulator test.
+     Keep both files the same otherwise. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRequestFilterKeyEvents="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/dienst_beschreibung"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="100"
+    android:packageNames="com.droidhang.ad,io.github.hustlebot.ihauctionbot.attrappe" />

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">IH Auction Bot</string>
+    <string name="dienst_name">IH Auction Bot</string>
+    <string name="dienst_beschreibung">Bids on copies in the Idle Heroes auction house, following your rules. To do this, the app takes screenshots, taps for you, types numbers into the price fields of the filter (and, if you want, your auction house secondary password) and shows a floating button over the game. While the bot runs, it can keep the screen on and dim it (power saving), and only if you turn it on (off by default) it puts a shield over the screen that blocks touches (pocket mode) or stops the bot at the first touch. At the end it can turn the screen off. While the bot runs, it watches the volume keys (volume down 3 times = emergency stop) and checks which app is in front, so that it only works inside Idle Heroes; it does not read other apps. Google text recognition (a second reader for numbers) is only used if you turn it on. The app has no internet access: screenshots and reports stay on your phone unless you share them yourself.</string>
+</resources>

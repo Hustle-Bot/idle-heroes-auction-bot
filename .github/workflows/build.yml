@@ -1,0 +1,216 @@
+# Build and test the IH Auction Bot.
+#
+#  - Every push and pull request: run the core tests and build an unsigned debug APK (no secrets needed,
+#    so this also works for forks).
+#  - Release (only when a maintainer starts it by hand, "Run workflow" on the Actions tab, or pushes a tag
+#    like v1.2.3): build the signed release APK, print its SHA-256, its signing certificate and its
+#    permission list, and publish all of it on the Releases page.
+#
+# Supply chain: every action is pinned to a full commit SHA, the Gradle wrapper JAR is checked against
+# Gradle's official checksums, and the default token is read-only. Only the release job may write
+# (it needs that to create the release).
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a signed release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the Gradle wrapper
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Core tests
+        run: |
+          chmod +x gradlew
+          ./gradlew :kern:test --stacktrace
+
+      - name: Debug APK (unsigned test build)
+        run: ./gradlew :app:assembleOssDebug --stacktrace
+
+      - name: Permissions of the debug APK
+        run: |
+          AAPT2=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2
+          "$AAPT2" dump permissions app/build/outputs/apk/oss/debug/app-oss-debug.apk | tee permissions.txt
+          if grep -E "android.permission.(INTERNET|REQUEST_INSTALL_PACKAGES)" permissions.txt; then
+            echo "::error::The public app must not request INTERNET or REQUEST_INSTALL_PACKAGES"
+            exit 1
+          fi
+
+  # Release, part 1: build the APK WITHOUT any secret. Gradle and its plugins never see the signing key.
+  release-build:
+    needs: test
+    # Only from a v* tag or by hand from the main branch.
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Only commits that are on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Releases are only made from commits on the main branch"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build the unsigned release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleOssRelease --stacktrace
+          cp app/build/outputs/apk/oss/release/app-oss-release-unsigned.apk unsigned.apk
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned
+          path: unsigned.apk
+          if-no-files-found: error
+
+  # Release, part 2: sign with Android's own apksigner only. This job holds the key but runs no project code and no Gradle.
+  release-sign:
+    needs: release-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: release
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned
+
+      # The signing key lives only in the repository secrets (never in the code). Without it no release is made.
+      - name: Sign, check certificate and permissions
+        env:
+          KEYSTORE_BASE64: ${{ secrets.IH_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.IH_KEYSTORE_PASSWORD }}
+          # SHA-256 of the project's release certificate (also in SECURITY.md). Every release must carry it.
+          ZERTIFIKAT: cd6129b55f0ea5821abeb3b6eca719aba874dccf5fba2d9e798a42cd0ee290f5
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Secret IH_KEYSTORE_BASE64 is missing - add it under Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          trap 'rm -f "$RUNNER_TEMP/release.p12"' EXIT
+          "$TOOLS/zipalign" -c -P 16 4 unsigned.apk || { "$TOOLS/zipalign" -f -P 16 4 unsigned.apk aligned.apk && mv aligned.apk unsigned.apk; }
+          "$TOOLS/apksigner" sign --ks "$RUNNER_TEMP/release.p12" --ks-type PKCS12 --ks-key-alias iahbot \
+            --ks-pass env:KS_PASS --out IH-Auction-Bot.apk unsigned.apk
+          rm -f "$RUNNER_TEMP/release.p12"
+          sha256sum IH-Auction-Bot.apk | tee IH-Auction-Bot.apk.sha256
+          "$TOOLS/apksigner" verify --print-certs IH-Auction-Bot.apk | tee certificate.txt
+          if ! grep -q "certificate SHA-256 digest: $ZERTIFIKAT" certificate.txt; then
+            echo "::error::The APK is not signed with the project's release certificate"
+            exit 1
+          fi
+          "$TOOLS/aapt2" dump permissions IH-Auction-Bot.apk | tee permissions.txt
+          if grep -E "android.permission.(INTERNET|REQUEST_INSTALL_PACKAGES)" permissions.txt; then
+            echo "::error::The public app must not request INTERNET or REQUEST_INSTALL_PACKAGES"
+            exit 1
+          fi
+          {
+            echo "Built by GitHub Actions from commit ${GITHUB_SHA} (run ${GITHUB_RUN_NUMBER}, version 1.${GITHUB_RUN_NUMBER})."
+            echo
+            echo "Before installing, compare the checksum of the file you downloaded with this one:"
+            echo
+            echo '```'
+            cat IH-Auction-Bot.apk.sha256
+            echo '```'
+            echo
+            echo "Signing certificate (every release shows the same SHA-256 digest, see SECURITY.md):"
+            echo
+            echo '```'
+            grep -E "certificate SHA-256 digest|certificate DN" certificate.txt
+            echo '```'
+            echo
+            echo "Permissions the app asks for (no INTERNET, no installing of other apps):"
+            echo
+            echo '```'
+            grep "uses-permission" permissions.txt
+            echo '```'
+            echo
+            echo "Build provenance: \`gh attestation verify IH-Auction-Bot.apk -R ${GITHUB_REPOSITORY}\`"
+            echo
+            echo "**Unofficial tool, not affiliated with the game's publisher. Using it probably breaks the game's Terms of"
+            echo "Service and can get your account banned. It spends Starry Gems according to your rules. Use at your own risk.**"
+            echo
+            echo "How to install and use it: see GUIDE.md. What the app does and does not do: see SECURITY.md."
+          } > notes.md
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            IH-Auction-Bot.apk
+            IH-Auction-Bot.apk.sha256
+            notes.md
+          if-no-files-found: error
+
+  # Release, part 2: attest and publish. Never sees the signing key and runs no build tools.
+  release-publish:
+    needs: release-sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      # Signed statement from GitHub: this APK was built by this workflow from this commit.
+      - name: Build provenance attestation
+        # Attestations are free for public repositories only.
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: IH-Auction-Bot.apk
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.{0}', github.run_number) }}
+        run: |
+          sha256sum -c IH-Auction-Bot.apk.sha256
+          gh release create "$TAG" IH-Auction-Bot.apk IH-Auction-Bot.apk.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "IH Auction Bot $TAG" \
+            --notes-file notes.md

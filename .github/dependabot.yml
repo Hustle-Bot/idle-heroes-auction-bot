@@ -1,0 +1,11 @@
+# Weekly update proposals (pull requests) for the build tools and GitHub Actions. Nothing is merged automatically.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

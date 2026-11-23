@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+*.jks
+*.p12
+*.keystore
+e2e-ergebnis/

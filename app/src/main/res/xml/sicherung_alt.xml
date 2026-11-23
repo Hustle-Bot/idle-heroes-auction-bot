@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11: settings are included in the backup, the secrets file geheim.xml (secondary password) never. The run
+     file lauf.xml ("a run is active") never either: restored on another phone it would lock the screen there.
+     Review round 2 (Nov 23): the player's consent (zustimmung.xml) never either - it has to be given on every phone
+     (older versions kept it in einstellungen.xml; it is moved once, see Zustimmung). Nor the game's window ids
+     (fenster.xml): they only count until the phone restarts. -->
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+    <exclude domain="sharedpref" path="geheim.xml" />
+    <exclude domain="sharedpref" path="lauf.xml" />
+    <exclude domain="sharedpref" path="zustimmung.xml" />
+    <exclude domain="sharedpref" path="fenster.xml" />
+</full-backup-content>
