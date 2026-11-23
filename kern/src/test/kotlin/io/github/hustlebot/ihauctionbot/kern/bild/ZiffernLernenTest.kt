@@ -23,6 +23,10 @@ object ZiffernLernen {
     /** "Buyout Price: 28" in the Bid window – only the number after the colon (measured on bid-fenster.jpg). */
     val SOFORT_IM_FENSTER = Rechteck(1440, 785, 1640, 845)
 
+    /** Nov 23: inside of the two price fields in the filter window (white x 1023–1283 and 1430–1689, measured on filter-fenster.jpg). */
+    val FILTER_MIN_TEXT = Rechteck(1024, 552, 1200, 618)
+    val FILTER_MAX_TEXT = Rechteck(1431, 552, 1600, 618)
+
     /**
      * Collect all samples; [ohneBericht]: leave out the crops of this error report, [ohneBild]: leave out this test
      * image (both for the cross-check).
@@ -47,6 +51,7 @@ object ZiffernLernen {
             e.zaehler?.let { nimm(e.name, b, Erkenner.ZAEHLER_FELD, Schrift.WEISS, it.toString()) }
             e.aktuellesGebot?.let { nimm(e.name, b, Erkenner.AKTUELLES_GEBOT_FELD, Schrift.HELL, it.toString()) }
             e.bestaetigen?.let { nimm(e.name, b, Erkenner.BESTAETIGEN_FELD, Schrift.BRAUN, it.toString(), 16, vonRechts = true) }
+            e.bietFeld?.let { nimm(e.name, b, Erkenner.BIET_FELD, Schrift.FELD, it.toString()) }
             for (z in e.zeilen.filter { !it.verdeckt }) {
                 nimm(e.name, b, Erkenner.preisFeld(z.oben), Schrift.WEISS, z.preis.toString())
                 z.sofort?.let { nimm(e.name, b, Erkenner.sofortFeld(z.oben), Schrift.WEISS, it.toString()) }
@@ -56,6 +61,12 @@ object ZiffernLernen {
         }
         nimm("bid-fenster Buyout", TestBilder.lade("bid-fenster"), SOFORT_IM_FENSTER, Schrift.HELL, "28")
         nimm("limit-50-status-7 Buyout", TestBilder.lade("limit-50-status-7"), SOFORT_IM_FENSTER, Schrift.HELL, "109")
+        // Nov 23 (review round 3): the price fields of the filter window have the same font as the bid field ("10" and "18"
+        // on filter-fenster.jpg) – they give the 0 and the 8.
+        if (ohneBild != "filter-fenster") {
+            nimm("filter-fenster min", TestBilder.lade("filter-fenster"), FILTER_MIN_TEXT, Schrift.FELD, "10")
+            nimm("filter-fenster max", TestBilder.lade("filter-fenster"), FILTER_MAX_TEXT, Schrift.FELD, "18")
+        }
         for (p in Lernziffern.alle.filter { it.bericht != ohneBericht }) {
             if (p.art == "bestaetigen") nimm(p.datei, p.bild, p.feld, Schrift.BRAUN, p.wert, 16, vonRechts = true)
             else nimm(p.datei, p.bild, p.feld, p.schrift, p.wert, p.minHoehe)

@@ -78,12 +78,19 @@ class Atlas(private val bilder: Bilder) {
     val aktuell: Schriftbild
     val zaehler: Schriftbild
 
+    /**
+     * Nov 23 (review round 3): the font of the bid field (and of the filter's price fields) – only the digits that are on real
+     * screenshots: 1 and 9 (bid-fenster "19"), 5 and 4 ("54"), 1, 0 and 8 (filter-fenster "10" / "18").
+     */
+    val feld: Schriftbild
+
     /** Where the numbers in a row start (x absolute, y relative to the top edge), from markt-c-minus row 314. */
     val preisStart: Pair<Int, Int>
     val zeitStart: Pair<Int, Int>
     val werteStart: List<Pair<Int, Int>>
     val aktuellStart: Pair<Int, Int>
     val zaehlerStart: Pair<Int, Int>
+    val feldStart: Pair<Int, Int>
 
     init {
         val cMinus = markt
@@ -128,6 +135,14 @@ class Atlas(private val bilder: Bilder) {
         }
         aktuell = a.fertig()
         aktuellStart = a.start(bieten, Erkenner.AKTUELLES_GEBOT_FELD, 0)
+
+        val fe = Sammler(Schrift.FELD, 14)
+        fe.sammle(bieten, Erkenner.BIET_FELD, "19", 0)
+        fe.sammle(bilder.lade("bid-fenster-b-ohne-buyout-1"), Erkenner.BIET_FELD, "54", 0)
+        fe.sammle(filter, FILTER_MIN_TEXT, "10", 0)
+        fe.sammle(filter, FILTER_MAX_TEXT, "18", 0)
+        feld = fe.fertig()
+        feldStart = fe.start(bieten, Erkenner.BIET_FELD, 0)
 
         val c = Sammler(Schrift.WEISS, 14)
         c.sammle(meine, Erkenner.ZAEHLER_FELD, "49", 0)
@@ -207,6 +222,10 @@ class Atlas(private val bilder: Bilder) {
     companion object {
         /** "Buyout Price: 28" in the Bid window – only the number (as when learning the digits). */
         val SOFORT_IM_FENSTER = Rechteck(1440, 785, 1640, 845)
+
+        /** Nov 23: inside of the two price fields of the filter window (same font as the bid field; as when learning). */
+        val FILTER_MIN_TEXT = Rechteck(1024, 552, 1200, 618)
+        val FILTER_MAX_TEXT = Rechteck(1431, 552, 1600, 618)
 
         const val KARTE_X0 = 750
         const val KARTE_X1 = 2330

@@ -55,7 +55,7 @@ sealed interface Aktion {
     }
 }
 
-/** Result of a step – like the "Outcome" in the Hustle Castle bot. */
+/** Result of a step. */
 sealed interface Ergebnis {
     /** Carry out an action, then continue after [naechsterSchrittMs]. */
     data class Handeln(val aktion: Aktion, val naechsterSchrittMs: Long) : Ergebnis
@@ -226,7 +226,7 @@ data class Takt(
     /** Like [altesBildMs], after "Bid", "Confirm" and "Verify" (the game waits for the server there). */
     val altesBildFensterMs: Long = 8000,
     /**
-     * Nov 11 (review: slow mobile network at school): after "Bid", "Confirm" or "Verify" the window closes
+     * Nov 11 (review: slow mobile network): after "Bid", "Confirm" or "Verify" the window closes
      * by itself as soon as the server answers. At home the list screenshot came after 0.5–0.8 s (report Nov 11); on a
      * mobile network the answer can take a few seconds. For this long afterwards the X at the top is NEVER tapped (unless
      * the game reports "-7" in the window – then it surely stays open). 10 s is more than ten times as long as usual and
@@ -392,8 +392,15 @@ const val KURZER_TIPP_MS = 60L
 /** Two rows count as in the same place if their top edges are this close together. */
 const val GLEICHE_STELLE_PX = 8
 
-/** Nov 22 (rate limit): these taps make the game reload the list from its server (refresh, filter Confirm, sort order). */
-private val LISTEN_ABFRAGE = setOf(Knopf.AKTUALISIEREN, Knopf.FILTER_OK, Knopf.SORT_RANG_AUF, Knopf.SORT_PREIS_AUF)
+/**
+ * Nov 22 (rate limit): these taps make the game reload the list from its server (refresh, filter Confirm, sort order).
+ * Nov 23 (review round 3): the menu and tab taps too (Auction Market, Bidding Market, My Biddings, tab Items for Bidding) –
+ * each of them loads a list, so they are under the same gap of [Takt.abfrageAbstandMs] (see [AuktionsBot.navigationZuFrueh]).
+ */
+private val LISTEN_ABFRAGE = setOf(
+    Knopf.AKTUALISIEREN, Knopf.FILTER_OK, Knopf.SORT_RANG_AUF, Knopf.SORT_PREIS_AUF,
+    Knopf.MENUE_AUKTIONSMARKT, Knopf.MENUE_BIETERMARKT, Knopf.MENUE_MEINE_GEBOTE, Knopf.REITER_BIETEN,
+)
 
 /** After these taps the list shows other rows – what was remembered (Nov 9) is forgotten. */
 private val LISTE_AENDERT_SICH = setOf(
@@ -648,7 +655,7 @@ fun ausrichtung(erste: Int?): Int? {
 
 /**
  * The bot's flow. Every call of [schritt] looks at the screen once and does
- * at most ONE action (as in the Hustle Castle bot). After every action the next
+ * at most ONE action. After every action the next
  * step checks on the new screenshot whether it worked.
  *
  * Flow (Nov 9):
@@ -657,8 +664,8 @@ fun ausrichtung(erste: Int?): Int? {
  *  2. Sort order "Awakened Tier ↑": so the copies that end soon are at the top.
  *  3. Bid from the top: clock = I am in front → nothing; hammer = outbid → bid again (+1); no remaining time
  *     (auction already over) → skip. Only up to the max price and never more than the SG allow.
- *     Bidding: row → Bid window (check Current Bid) → Bid (never Buyout) → secondary password if needed →
- *     confirm window (amount ≤ max price + 1) → Confirm.
+ *     Bidding: row → Bid window (check Current Bid; Nov 23: and the bid field, never under a message band) → Bid (never
+ *     Buyout) → secondary password if needed → confirm window (amount ≤ max price + 1) → Confirm.
  *  4. If only copies that end later come, or the list is at its end → refresh, start over at the top.
  *  5. Next rank (next rule) if there was nothing to bid twice in a row until the end
  *     or I was outbid 5 times in a row. After the last rule, the first one again.
@@ -783,6 +790,8 @@ class AuktionsBot(
         val endeUm: Instant? = null,
         /** Nov 22 (buyout): the row was opened to buy it outright for this many SG ("Buyout Price" in the list). */
         val buyout: Int? = null,
+        /** Nov 23 (review round 3): what the bid field showed when "Bid" was tapped (for the log line "Bid placed"). */
+        val bietFeld: String? = null,
     )
 
     /**
@@ -1255,6 +1264,13 @@ class AuktionsBot(
 
     // Nov 11 (review: "never wait silently forever"): since when the bot has been waiting for something that does not come.
     private var bidMeldungSeit: Instant? = null
+
+    /**
+     * Nov 23 (review round 3): the last screenshot of a Bid window with a message band on it. While a band lies over the
+     * window the bot does not tap Bid – the short waits for a readable "Current Bid" or the Bid button count only from the
+     * end of the band (otherwise a single unreadable screenshot right after a band closed the window).
+     */
+    private var bidMeldungZuletzt: Instant? = null
     private var meineMeldungSeit: Instant? = null
     private var passwortFehltSeit: Instant? = null
     private var sgUnlesbarSeit: Instant? = null
@@ -1486,8 +1502,8 @@ class AuktionsBot(
             ortSeit = jetzt
         }
 
-        // Nov 9: "Lost connection with game server." → stop, tap nothing, screen off.
-        // Nov 22 (overnight, owner's decision): first wait, then tap Confirm and wait for the game (see [verbindungWeg]).
+        // Nov 9: "Lost connection with game server." → (back then) stop, tap nothing, screen off.
+        // Nov 22 (overnight, owner's decision): now first wait, then tap Confirm and wait for the game (see [verbindungWeg]).
         if (bild.ort == Ort.VERBINDUNG_WEG) return verbindungWeg(bild, jetzt)
         verbindungWegSeit?.let {
             // The dialog went away without our Confirm (the game reconnected by itself, or a single misread screenshot):
@@ -1819,6 +1835,14 @@ class AuktionsBot(
         letzteAbfrageUm?.plusMillis(maxOf(abstandMs, takt.abfrageAbstandMs))
 
     /**
+     * Nov 23 (review round 3: "navigation taps also reload lists"): a tap on a menu entry or a tab loads a list from the
+     * game's server like the refresh button – so it waits for the same gap ([Takt.abfrageAbstandMs] after the last reload).
+     * Nothing is tapped meanwhile; the bot looks again every [Takt.abfrageBlickMs]. null = tap now.
+     */
+    private fun navigationZuFrueh(jetzt: Instant, wohin: String): Ergebnis? =
+        abfrageZuFrueh(jetzt, takt.abfrageAbstandMs, "$wohin: waiting for the gap between two reloads of a list", takt.abfrageBlickMs)
+
+    /**
      * Nov 22 (review: "the bot refreshes the list every ~1.2 s all night"): at the end of a round – if it placed no bid and no
      * copy that fits a rule ends within [BALD_ENDE_SEK] (see [baldEndeMerken]) – the next refresh comes at the earliest
      * [Takt.leerlaufMinMs] after the last reload, growing ×1.5 with every such round up to [Takt.leerlaufMaxMs]. While it waits,
@@ -1999,8 +2023,10 @@ class AuktionsBot(
             Ort.MEINE_GEBOTE -> meineGebote(bild, jetzt)
             Ort.FILTER -> filterFenster(bild)
             Ort.SORTIEREN -> sortierFenster(bild, jetzt)
-            Ort.MARKT_ANZEIGE -> tippe(bild, Knopf.REITER_BIETEN, "tab Items for Bidding", takt.nachTippenMs)
-            Ort.AUKTIONSHAUS_ANDERS -> tippe(bild, Knopf.MENUE_AUKTIONSMARKT, "to the Auction Market", takt.nachTippenMs)
+            Ort.MARKT_ANZEIGE -> navigationZuFrueh(jetzt, "Tab Items for Bidding")
+                ?: tippe(bild, Knopf.REITER_BIETEN, "tab Items for Bidding", takt.nachTippenMs)
+            Ort.AUKTIONSHAUS_ANDERS -> navigationZuFrueh(jetzt, "To the Auction Market")
+                ?: tippe(bild, Knopf.MENUE_AUKTIONSMARKT, "to the Auction Market", takt.nachTippenMs)
             Ort.UNBEKANNT -> Ergebnis.Unsicher("unknown", takt.unbekanntMs)
             Ort.LADEN -> Ergebnis.Warten("Game is loading – waiting, tapping nothing", takt.ladenPollMs)
             Ort.VERBINDUNG_WEG -> beenden(StoppGrund.VERBINDUNG_WEG)
@@ -2856,6 +2882,8 @@ class AuktionsBot(
                 protokoll("About ${gebote.eintraege}/${gebote.limit} in My Biddings – cleaning up there before the game reports \"-7\"")
             }
         }
+        // Nov 23 (review round 3): the tap on "My Biddings" loads a list too – at most one reload every 5 s.
+        navigationZuFrueh(jetzt, "To My Biddings")?.let { return it }
         val a = aufraeumen ?: Aufraeumen(jetzt).also { aufraeumen = it }
         a.menueVersuche++
         if (a.menueVersuche > 3) {
@@ -3316,7 +3344,7 @@ class AuktionsBot(
         if (phase == Phase.Suchen && gerade(xTippUm, jetzt)) {
             return Ergebnis.Warten("Bid window is closing (X tapped) – waiting", takt.ruhigMs)
         }
-        if (meldung == null) bidMeldungSeit = null
+        if (meldung == null) bidMeldungSeit = null else bidMeldungZuletzt = jetzt
         // Nov 11 (field test 1.20): learn the position of the Bid button (steady window, nothing on top).
         if (meldung == null && ortRuhig) bild.knopf(Knopf.BIETEN)?.let { bidKnopfGelernt = it }
         if (meldung != null) {
@@ -3337,8 +3365,9 @@ class AuktionsBot(
             if (meldung.wieErfolg && phase !is Phase.BietenOffen) {
                 return Ergebnis.Warten("\"Bidding successful\" – the Bid window closes by itself, tapping nothing", takt.meldungWartenMs)
             }
-            // All other messages (outbid, "Bid Failure" of another copy, message after Verify …) do not hold things
-            // up: carry on as without a message. The X at the top still stays locked as long as the window could be closing.
+            // All other messages (outbid, "Bid Failure" of another copy, message after Verify …): the checks below run as
+            // without a message (closing for "too expensive" etc. still works), but Bid is not tapped until the band is gone
+            // (Nov 23, review round 3). The X at the top still stays locked as long as the window could be closing.
         }
 
         // After the secondary password the Bid window is back → "Bid" once more.
@@ -3392,11 +3421,14 @@ class AuktionsBot(
                     return ohneGebotSchliessen(bild, p.ziel, jetzt, warum, sperren)
                 }
                 p.schliessen?.let { z -> return zu(z.warum, z.text, z.sperren) }
+                // Nov 23 (review round 3): the bot does not tap Bid while a band lies over the window – the short waits below
+                // count from the window's opening, or from the end of the last band in it if that came later.
+                val wartenAb = bidMeldungZuletzt?.takeIf { it.isAfter(p.seit) } ?: p.seit
                 // Nov 11 (review: bid 26 blindly with a maximum of 21): NEVER bid blindly. Without a readable "Current Bid"
                 // the bot does not know what the game is bidding (the list may have moved – then a more expensive copy
                 // opened). Read again for a few screenshots, otherwise close and do not open the row for 60 s.
                 if (akt == null) {
-                    if (Duration.between(p.seit, jetzt).toMillis() < takt.currentBidWartenMs) {
+                    if (Duration.between(wartenAb, jetzt).toMillis() < takt.currentBidWartenMs) {
                         // Nov 12: "the same twice in a row" (below) starts over after an unreadable screenshot.
                         phase = p.copy(currentBidVorher = null)
                         return Ergebnis.Warten("Current Bid not readable – looking again", takt.ruhigMs)
@@ -3432,38 +3464,62 @@ class AuktionsBot(
                     // (at most the max price, see above). If that does not work within [Takt.currentBidWartenMs] × 2: close.
                     !p.ziel.listenpreisBekannt && (!ortRuhig || p.currentBidVorher != akt) -> {
                         if (ortRuhig) phase = p.copy(currentBidVorher = akt)
-                        if (Duration.between(p.seit, jetzt).toMillis() >= 2 * takt.currentBidWartenMs) {
+                        if (Duration.between(wartenAb, jetzt).toMillis() >= 2 * takt.currentBidWartenMs) {
                             zu("Current Bid not certain", "Current Bid not read the same twice (price in the row unreadable) – no bid")
                         } else {
                             Ergebnis.Warten("Price in the row was not readable – reading Current Bid a second time", takt.ruhigMs)
                         }
                     }
+                    // Nov 23 (review round 3: "messages are told apart only by the size of their band"): any two-line band counted
+                    // as the known "Bid Failure", and Bid was then tapped at its learned position UNDER the band. Now Bid is never
+                    // tapped while a message band lies over the window (every band there covers the Bid button) – wait until it is
+                    // gone; if it stays [Takt.fensterZuWartenMs], close the window with the red X (that is not under it). "-7",
+                    // "Bidding successful" and unknown bands are handled above as before.
+                    meldung != null ->
+                        // Counted in THIS window only (a band from an earlier Bid window does not count).
+                        if (bidMeldungSeit?.let { Duration.between(nachPause(maxOf(it, p.seit)), jetzt).toMillis() >= takt.fensterZuWartenMs } == true) {
+                            zu("message over the Bid button", "A message has been lying over the Bid button for ${takt.fensterZuWartenMs / 1000} s – closing, no bid")
+                        } else {
+                            Ergebnis.Warten("Message over the Bid window – not tapping Bid under it, waiting until it is gone", takt.meldungWartenMs)
+                        }
                     // Nov 11 (field test 1.20: "remember where the buttons are"): first screenshot of the window and the button
                     // is NOT at its learned position (still opening) – wait one screenshot.
                     !ortRuhig && bild.knopf(Knopf.BIETEN) != null && !anGelernterStelle(bild.knopf(Knopf.BIETEN)!!) ->
                         Ergebnis.Warten("Bid window is still opening – Bid button not at its position yet", takt.ruhigMs)
-                    // Nov 9: only tap the "Bid" button if it was found on the screenshot.
-                    // Nov 11 (field test 1.20): if a message lies over it (it covers exactly the button, "Current Bid"
-                    // stays readable), the learned position applies.
-                    bild.knopf(Knopf.BIETEN) == null && meldung != null && bidKnopfGelernt != null && !ortRuhig ->
-                        Ergebnis.Warten("Bid button under the message – first a steady screenshot, then at the learned position", takt.ruhigMs)
-                    bild.knopf(Knopf.BIETEN) == null && !(meldung != null && bidKnopfGelernt != null) -> {
-                        if (Duration.between(p.seit, jetzt).toMillis() < takt.fensterWartenMs) {
+                    // Nov 9: only tap the "Bid" button if it was found on THIS screenshot (Nov 23: never at a learned position).
+                    bild.knopf(Knopf.BIETEN) == null -> {
+                        if (Duration.between(wartenAb, jetzt).toMillis() < takt.fensterWartenMs) {
                             Ergebnis.Unsicher("Bid window without a Bid button found – waiting", 300)
                         } else {
                             zu("Bid button not found", "Bid button not found in the Bid window – closing")
                         }
                     }
+                    // Nov 23 (review round 3: "the bot assumes the bid field holds Current Bid + 1"): the field is editable – a tap
+                    // on "+" or a quirk of the game could raise it, and "Bid" bids what is IN the field. Read on THIS screenshot:
+                    //  - nothing at all readable on the first image of the window (normally the digits are there, as learned
+                    //    digits or '?') – look once more on a steady screenshot before tapping without the check;
+                    //  - higher than Current Bid + 1, above the rule's highest bid, or a learned digit that does not fit
+                    //    ([bietFeldUrteil]) – never Bid and never correct it with + or −: on a steady screenshot the window is
+                    //    closed with the red X;
+                    //  - otherwise Bid, the log says what the field showed ([bietFeldPruefen]).
+                    bild.bietFeldMuster == null && !ortRuhig ->
+                        Ergebnis.Warten("Bid field not readable on this screenshot – looking again on a steady one", takt.ruhigMs)
+                    bietFeldUrteil(bild.bietFeldMuster, naechstes, p.ziel.regel) == FeldUrteil.ZU_HOCH && !ortRuhig ->
+                        Ergebnis.Warten("Bid field shows ${feldAnzeige(bild.bietFeldMuster)} instead of $naechstes – looking again on a steady screenshot", takt.ruhigMs)
+                    bietFeldUrteil(bild.bietFeldMuster, naechstes, p.ziel.regel) == FeldUrteil.ZU_HOCH -> {
+                        bietFeldFalsch++
+                        zu(
+                            "bid field ${feldAnzeige(bild.bietFeldMuster)}",
+                            "Bid field shows ${feldAnzeige(bild.bietFeldMuster)} instead of $naechstes SG (Current Bid $akt, at most " +
+                                "${p.ziel.regel.hoechstesGebot} SG) – not tapping Bid, closing the window (never correcting the field with + or −)",
+                        )
+                    }
                     else -> {
-                        phase = Phase.BietenGetippt(p.ziel.copy(preis = naechstes, currentBidGelesen = true), jetzt)
+                        val feldText = bietFeldPruefen(bild.bietFeldMuster, akt, naechstes, p.ziel.regel)
+                        phase = Phase.BietenGetippt(p.ziel.copy(preis = naechstes, currentBidGelesen = true, bietFeld = feldText), jetzt)
                         bidTipps++
                         // Nov 9: always only "Bid", never "Buyout Price".
-                        val knopf = bild.knopf(Knopf.BIETEN)
-                        if (knopf != null) {
-                            tippe(bild, Knopf.BIETEN, "Bid for $naechstes SG", takt.nachBietenMs)
-                        } else {
-                            Ergebnis.Handeln(Aktion.Tippen(bidKnopfGelernt!!, "Bid for $naechstes SG (learned position, message on top)"), takt.nachBietenMs)
-                        }
+                        tippe(bild, Knopf.BIETEN, "Bid for $naechstes SG ($feldText)", takt.nachBietenMs)
                     }
                 }
             }
@@ -3563,6 +3619,75 @@ class AuktionsBot(
      */
     private fun fremdeMeldungBleibt(jetzt: Instant): Boolean =
         bremsMeldungSeit?.let { Duration.between(nachPause(it), jetzt).toMillis() >= takt.fensterZuWartenMs } == true
+
+    /** Nov 23 (review round 3): what the bid field says about the planned bid (Current Bid + 1), see [bietFeldUrteil]. */
+    private enum class FeldUrteil { GEPRUEFT, PASST_TEILWEISE, UNLESBAR, NIEDRIGER, ZU_HOCH }
+
+    /**
+     * Nov 23 (review round 3): compares the bid field ([muster], digit by digit, '?' = digit not learned yet) with the planned
+     * bid [naechstes] = Current Bid + 1. ZU_HOCH ("Bid" would or could bid more than planned) when the field has more digits,
+     * when even its smallest possible value is above [naechstes] or the rule's highest bid, or when a learned digit differs and
+     * it is not certain that the field is lower. Unlearned digits are counted as 0 (smallest) and 9 (largest).
+     */
+    private fun bietFeldUrteil(muster: String?, naechstes: Int, regel: Suchregel): FeldUrteil {
+        if (muster == null) return FeldUrteil.UNLESBAR
+        val soll = naechstes.toString()
+        if (muster.length != soll.length) return if (muster.length > soll.length) FeldUrteil.ZU_HOCH else FeldUrteil.NIEDRIGER
+        val min = muster.replace('?', '0').toLong()
+        val max = muster.replace('?', '9').toLong()
+        val passt = muster.indices.all { muster[it] == '?' || muster[it] == soll[it] }
+        return when {
+            min > naechstes || min > regel.hoechstesGebot -> FeldUrteil.ZU_HOCH
+            passt -> if ('?' in muster) FeldUrteil.PASST_TEILWEISE else FeldUrteil.GEPRUEFT
+            max < naechstes -> FeldUrteil.NIEDRIGER
+            else -> FeldUrteil.ZU_HOCH
+        }
+    }
+
+    /** The bid field for the log: "56 SG", or "\"5?\" (? = digit not learned yet)". */
+    private fun feldAnzeige(muster: String?): String =
+        if (muster == null) "?" else if ('?' in muster) "\"$muster\" (? = digit not learned yet)" else "$muster SG"
+
+    /**
+     * Nov 23 (review round 3): the bid field on the screenshot on which "Bid" is tapped (never [FeldUrteil.ZU_HOCH]) – text for
+     * the log and the counters.
+     *  - Current Bid + 1: checked.
+     *  - Not readable, or only partly ("5?" fits 53): tap as before – "Current Bid" was checked (at most the rule's max
+     *    price). The digits 2, 3, 6 and 7 of this font are not learned yet (about 2 of 3 prices); refusing would stop most bids
+     *    (measured on the real Bid windows and in the long run, see DauerlaufTest). The crop goes into the learning images.
+     *  - Lower than Current Bid + 1: tap as before – "Bid" can then never bid more than planned (maybe a first bid on a copy
+     *    without bids; to be checked on a phone). Logged.
+     */
+    private fun bietFeldPruefen(muster: String?, akt: Int, naechstes: Int, regel: Suchregel): String =
+        when (bietFeldUrteil(muster, naechstes, regel)) {
+            FeldUrteil.GEPRUEFT -> {
+                bietFeldGeprueft++
+                "bid field $muster checked"
+            }
+            FeldUrteil.PASST_TEILWEISE -> {
+                bietFeldUngeprueft++
+                "bid field \"$muster\" fits, not fully readable"
+            }
+            FeldUrteil.NIEDRIGER -> {
+                bietFeldUngeprueft++
+                protokoll("Bid field shows ${feldAnzeige(muster)}, Current Bid $akt – lower than $naechstes SG: tapping Bid, it cannot bid more than planned")
+                "bid field ${feldAnzeige(muster)}, lower"
+            }
+            else -> {
+                bietFeldUngeprueft++
+                "bid field not readable"
+            }
+        }
+
+    /** Nov 23 (review round 3): Bid taps with the bid field read as Current Bid + 1 / not checked (unreadable or lower). */
+    var bietFeldGeprueft: Int = 0
+        private set
+    var bietFeldUngeprueft: Int = 0
+        private set
+
+    /** Nov 23 (review round 3): Bid windows closed because the bid field showed more than Current Bid + 1. */
+    var bietFeldFalsch: Int = 0
+        private set
 
     /** Nov 11 (field test 1.20): is the Bid button at its learned position (window fully open)? */
     private fun anGelernterStelle(p: Punkt): Boolean {
@@ -3815,7 +3940,7 @@ class AuktionsBot(
         zuOftInFolge = 0
         protokoll(
             (if (ziel.nachbieten) "Re-bid placed" else "Bid placed") + ": ${ziel.regel.kopie} for $preis SG (${ziel.id})$wie" +
-                (gebotStart?.let { " · ⏱ ${dauer(it, jetzt)}" } ?: ""),
+                (ziel.bietFeld?.let { " · $it" } ?: "") + (gebotStart?.let { " · ⏱ ${dauer(it, jetzt)}" } ?: ""),
         )
         gebotStart = null
         // Nov 11: bid again while cleaning up My Biddings.
@@ -3987,8 +4112,10 @@ class AuktionsBot(
         // Nov 11: after "-7" the bot cleans up (even if it is already here).
         val a = a0 ?: if (gebote.limitGemeldet && gebote.wiederBietenAb == null) Aufraeumen(jetzt).also { aufraeumen = it } else null
         if (a == null) {
+            // Nov 23 (review round 3): wait for the gap between two reloads first (then the line is logged only once).
+            navigationZuFrueh(jetzt, "Back to the Bidding Market")?.let { return it }
             protokoll(stand)
-            return zurueckZumMarkt(bild)
+            return zurueckZumMarkt(bild, jetzt)
         }
         // Nov 9: if the counter shows fewer than 50 and "-7" was not certain, it was a false alarm.
         // Nov 11: the same if the bot is only here because of its own count – then there is still room.
@@ -4004,7 +4131,7 @@ class AuktionsBot(
             protokoll(
                 "$stand – " + if (warLimit) "that was not the 50 limit, bidding on" else "still room, no cleanup needed – bidding on",
             )
-            return zurueckZumMarkt(bild)
+            return zurueckZumMarkt(bild, jetzt)
         }
         if (a.ersterBlick) {
             a.ersterBlick = false
@@ -4315,7 +4442,7 @@ class AuktionsBot(
      * Otherwise as before: do not bid until the earliest end of a bid (+5 s, at most 5 minutes).
      */
     private fun aufraeumenFertig(bild: Bildschirm, jetzt: Instant): Ergebnis {
-        val a = aufraeumen ?: return zurueckZumMarkt(bild)
+        val a = aufraeumen ?: return zurueckZumMarkt(bild, jetzt)
         aufraeumen = null
         // Counter not readable, but the whole list was seen → the rows seen count.
         val ganz = a.amEnde || bild.zeilen.isEmpty()
@@ -4354,14 +4481,18 @@ class AuktionsBot(
                 )
             }
         }
-        return zurueckZumMarkt(bild)
+        return zurueckZumMarkt(bild, jetzt)
     }
 
-    /** Back to the Bidding Market (the bidding list checks filter and sort order there on every screenshot). */
-    private fun zurueckZumMarkt(bild: Bildschirm): Ergebnis {
+    /**
+     * Back to the Bidding Market (the bidding list checks filter and sort order there on every screenshot).
+     * Nov 23 (review round 3): the menu tap reloads the bidding list – at most one reload every 5 s ([navigationZuFrueh]).
+     */
+    private fun zurueckZumMarkt(bild: Bildschirm, jetzt: Instant): Ergebnis {
         phase = Phase.Suchen
         vorWischen = null
         nachWischen = null
+        navigationZuFrueh(jetzt, "Back to the Bidding Market")?.let { return it }
         return tippe(bild, Knopf.MENUE_BIETERMARKT, "back to the Bidding Market", takt.nachTippenMs)
     }
 
@@ -4379,13 +4510,24 @@ class AuktionsBot(
     private fun startAnheben(jetzt: Instant) {
         val start = startSg ?: return
         val stabil = sgStabil(jetzt) ?: return
-        if (stabil <= start) return
-        val neu = (stabil + gebote.nettoSg()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        if (stabil <= start) {
+            kontoZuletzt = start.toLong() - stabil
+            return
+        }
+        // Nov 23 (review round 3, found in the long runs: with a top-up the budget was overshot by up to ~60 SG on 6 of 16
+        // seeds – the bookkeeping had counted a won copy as "lost, SG came back"): what the balance showed as spent just
+        // before (start − the last steady balance at or below the start) counts too, if it is more. Stricter, never looser.
+        val ausgegeben = maxOf(gebote.nettoSg(), kontoZuletzt ?: 0L)
+        val neu = (stabil + ausgegeben).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        kontoZuletzt = null
         stopp.sgBudget?.let {
             protokoll("SG balance $stabil is above the start ($start) – SG came in from outside, the budget still counts only what this run spends (start now $neu)")
         }
         startSg = neu
     }
+
+    /** Nov 23: start − the last steady SG balance at or below the start (what the balance showed as spent; see [startAnheben]). */
+    private var kontoZuletzt: Long? = null
 
     /** How many SG of the budget are still free (null = no budget set). */
     private fun budgetRest(sg: Int): Int? {

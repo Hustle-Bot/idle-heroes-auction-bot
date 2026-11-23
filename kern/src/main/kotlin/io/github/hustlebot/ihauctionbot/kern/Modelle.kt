@@ -36,7 +36,9 @@ enum class Ort(val text: String) {
 
     /**
      * Nov 9: "Lost connection with game server." with a yellow Confirm button in the middle.
-     * Then the bot stops (taps nothing). Derived from a PC screenshot – not yet checked on the phone.
+     * Nov 22: the bot waits a minute, then taps Confirm and reconnects (at most `maxNeuverbindungen` times per run, see
+     * [AuktionsBot] `verbindungWeg`); only after that, or with 0 reconnects allowed, it stops (StoppGrund.VERBINDUNG_WEG).
+     * Derived from a PC screenshot – not yet checked on the phone.
      */
     VERBINDUNG_WEG("connection lost"),
 
@@ -123,14 +125,19 @@ data class Meldung(val breite: Int, val yOben: Int = 0, val yUnten: Int = 0) {
      */
     val wieZuOft: Boolean get() = !wieFehlschlag && abs(breite - ZU_OFT_BREITE) <= ZU_OFT_TOLERANZ
 
-    /** Nov 22: a message the bot knows over the list ("Bidding successful", "Bid Failure") – it keeps bidding through it. */
+    /**
+     * Nov 22: a message the bot knows over the list ("Bidding successful", "Bid Failure") – it keeps tapping rows through it.
+     * Nov 23 (review round 3): told apart only by the size of the band (any two-line band counts as "Bid Failure"), so it is
+     * never a reason to tap "Bid" under a band – in the Bid window the bot waits until every band is gone.
+     */
     val bekannt: Boolean get() = wieErfolg || wieFehlschlag
 
     /**
      * Nov 23 (review: unknown messages in the Bid window were tapped through): a message the bot knows in the Bid or confirm
      * window – "Bidding successful", "Bid Failure" or the form of "Server status code:-7" (short, ~762 px; the short message
-     * right after the secondary password has the same form, field test 1.8). These are handled as before; every other band
-     * there pauses the bot, and Bid, Buyout and Confirm are never tapped under it.
+     * right after the secondary password has the same form, field test 1.8). These do not pause the bot ("-7" is handled as
+     * before); every other band there pauses it. Bid and Buyout are never tapped under ANY band (Nov 23, review round 3),
+     * Confirm never under an unknown one.
      */
     val bekanntImFenster: Boolean get() = bekannt || (kurz && wieLimit)
 
@@ -243,6 +250,16 @@ data class Bildschirm(
     val bestaetigenPreis: Int? = null,
     /** Nov 22 (buyout): Bid window "Buyout Price: N" (null = not readable or "--"). */
     val sofortPreis: Int? = null,
+    /**
+     * Nov 23 (review round 3): Bid window – the number in the editable bid field between "−" and "+" (the amount a tap on
+     * "Bid" really bids; normally Current Bid + 1). null = not readable, or a message band lies over it.
+     */
+    val bietFeld: Int? = null,
+    /**
+     * Nov 23: the bid field digit by digit, '?' for a digit that is there but not learned yet (e.g. "5?" for 53) – enough to
+     * see many raised fields when [bietFeld] is not readable as a whole. null = nothing readable / a band over it.
+     */
+    val bietFeldMuster: String? = bietFeld?.toString(),
     val knoepfe: Map<Knopf, Punkt> = emptyMap(),
     val filterFelder: List<FilterFeld> = emptyList(),
     /** Filter window: how many characters are in the price fields (e.g. "10" = 2, "99999999" = 8). */

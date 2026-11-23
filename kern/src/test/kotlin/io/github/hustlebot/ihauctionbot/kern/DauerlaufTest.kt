@@ -223,14 +223,16 @@ class DauerLauf(val sz: Szenario, val seed: Long, val takt: Takt = Takt()) {
         "%-34s Seed %-3d %5.1f h · %5d bids (%.2f/min) · won %4d (bot estimates %4d), in front open %3d · -7: %3d · Bid Failure %3d · My Biddings %3d× · X %3d · " +
             "loading %3d · password again %d · swipes %d (exactly 5 new: %d) · through message %d · missed taps %d, in transition %d, locked %d · longest quiet %.1f min · count +%d/−%d · SG %d → %d · " +
             "lost connection %d, reconnects %d · notifications %d · pop-ups %d · restarts %d · bought out %d (bot %d) · " +
-            "refreshes %d (%.0f/h, reloads %d, closer than 5 s %d) · too frequently %d (bot %d, after a reload %d) · " +
+            "refreshes %d (%.0f/h, reloads %d incl. menu %d, closer than 5 s %d) · too frequently %d (bot %d, after a reload %d) · " +
+            "bid field checked %d, not checked %d, raised %d (closed %d, not seen %d, above max %d, own bid outbid %d) · " +
             "SG net %d (budget %s) · stop: %s · problems: %d",
         sz.name, seed, minuten / 60, sim.gebote.size, geboteProMinute, sim.gewonnen, bot.gebote.gekaufteKopien, sim.vorneOffen(), sim.limitMeldungen,
         sim.bidFehlschlaege, sim.meineGeboteGeoeffnet, sim.kreuze, sim.ladenEreignisse, sim.neueSitzungen, sim.hauptWischer, sim.genauFuenfNeu, sim.tippsDurchMeldung, sim.fehltipps, sim.tippsImUebergang,
         gesperrteTipps, laengsteRuhe / 60_000.0, eintraegeZuHoch, eintraegeZuNiedrig, sim.startSg, sim.sg,
         sim.trennungen, bot.neuverbindungen, sim.benachrichtigungen, sim.popups, sim.neustarts, sim.sofortGekauft, bot.sofortGekauft,
-        sim.aktualisierungen, aktualisierungenProStunde, sim.listenAbfragen, sim.abfragenZuDicht, sim.zuOftMeldungen, bot.zuOftMeldungen,
-        sim.zuOftBeiAbfrage, sim.nettoAusgegeben, sz.sgBudget?.toString() ?: "-", stopp?.name ?: "-", probleme.size,
+        sim.aktualisierungen, aktualisierungenProStunde, sim.listenAbfragen, sim.navAbfragen, sim.abfragenZuDicht, sim.zuOftMeldungen, bot.zuOftMeldungen,
+        sim.zuOftBeiAbfrage, bot.bietFeldGeprueft, bot.bietFeldUngeprueft, sim.feldHoeherFenster, bot.bietFeldFalsch,
+        sim.feldHoeherUnerkannt, sim.ueberMaxUnerkannt, sim.selbstUeberbotenUnerkannt, sim.nettoAusgegeben, sz.sgBudget?.toString() ?: "-", stopp?.name ?: "-", probleme.size,
     )
 
     private var debugAuszuege = 0
@@ -245,7 +247,7 @@ class DauerLauf(val sz: Szenario, val seed: Long, val takt: Takt = Takt()) {
 }
 
 /**
- * Nov 11: tomorrow the bot runs alone for hours (while the user is at school). These tests let it run for many simulated hours in the
+ * Nov 11: the bot runs alone for hours (long unattended run). These tests let it run for many simulated hours in the
  * rebuilt auction house ([DauerSpiel]) – with everything that happens in the real game – and check at every
  * step: never tap into the purchase bar at the top, never Cancel/Buyout, no bid above max price+1, above the SG or
  * above the budget, never get stuck, and every stop has a clear reason.
@@ -677,5 +679,31 @@ class DauerlaufTest {
             ),
             601, 602, 603, 604,
         )
+    }
+
+    /**
+     * Nov 23 (review round 3: "the bot assumes the bid field holds Current Bid + 1"): in every 10th Bid window the field is
+     * 1–3 SG higher ("+" tapped, a quirk of the game) – and "Bid" bids what is in it. The bot reads the field digit by digit
+     * (learned: 0, 1, 4, 5, 8, 9; the others show as '?'): it never taps Bid on a field it can see is too high ([DauerSpiel]
+     * reports that as a violation) and closes the window. A raise hidden by digits not learned yet is counted – that is the
+     * part the bot still cannot see (as before the check).
+     */
+    @Test
+    fun `bid field raised now and then - never Bid on a field the bot can see is too high`() {
+        val laeufe = pruefe(Szenario("bid field raised", listOf(b, c), stunden = 8.0, startSg = 80_000, feldHoeher = 0.1), 111, 112)
+        if (faktor >= 1.0) for (l in laeufe) {
+            assertTrue(l.sim.feldHoeherFenster > 100 && l.bot.bietFeldFalsch > 0 && l.sim.feldHoeherGetippt == 0) { l.zusammenfassung() }
+            assertTrue(l.geboteProMinute > 4.0) { l.zusammenfassung() }
+        }
+        // The same with every digit learned: only a field the bot did not see at all (a band over it, a moving first image)
+        // can still slip through.
+        val alle = pruefe(
+            Szenario("bid field raised, all digits", listOf(b, c), stunden = 8.0, startSg = 80_000, feldHoeher = 0.1, feldZiffern = null),
+            111,
+        ).single()
+        if (faktor >= 1.0) {
+            val l = laeufe.first()
+            assertTrue(alle.sim.feldHoeherUnerkannt < l.sim.feldHoeherUnerkannt) { alle.zusammenfassung() + "\n" + l.zusammenfassung() }
+        }
     }
 }

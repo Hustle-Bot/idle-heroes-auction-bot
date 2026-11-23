@@ -348,7 +348,9 @@ class TempoUndWischenTest {
     }
 
     @Test
-    fun `B - message over the Bid button - bot taps at the remembered position, never at the top`() {
+    fun `B - message over the Bid button - never Bid under it (not at the remembered position either), never at the top`() {
+        // Nov 23 (review round 3): before, the bot tapped Bid at the remembered position under the band. Now it waits until
+        // the band is gone; a band that stays closes the window with the X.
         val spiel = SpielAttrappe(start)
         spiel.mitBestaetigen = false
         spiel.zeile("C-", 15, 60, 1, 1, 1)
@@ -366,10 +368,12 @@ class TempoUndWischenTest {
         val bidTipps = ArrayList<String>()
         laufen(bot, spiel, 300, jeSchritt = { e ->
             if (e is Ergebnis.Handeln && e.aktion.grund.startsWith("Bid for")) bidTipps += e.aktion.grund
-        }) { spiel.gebotePreise.size >= 3 }
-        assertEquals(listOf(16, 17, 18), spiel.gebotePreise.sorted(), log.joinToString("\n"))
+        })
+        assertEquals(listOf(16), spiel.gebotePreise, log.joinToString("\n"))
         assertEquals(Punkt(1641, 690), bot.bidKnopfGelernt)
-        assertTrue(bidTipps.count { it.contains("learned position") } >= 2, bidTipps.toString())
+        assertEquals(1, bidTipps.size, bidTipps.toString())
+        assertTrue(bidTipps.none { it.contains("learned position") }, bidTipps.toString())
+        assertTrue(log.any { it.startsWith("A message has been lying over the Bid button") }, log.joinToString("\n"))
         assertTrue(spiel.obenGetippt.isEmpty(), "${spiel.obenGetippt}")
     }
 

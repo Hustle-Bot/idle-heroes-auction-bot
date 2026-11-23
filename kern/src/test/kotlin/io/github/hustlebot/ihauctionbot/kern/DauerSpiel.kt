@@ -8,7 +8,7 @@ import kotlin.math.max
 import kotlin.random.Random
 
 /**
- * Nov 11 (long run for the school day): what happens in the rebuilt auction house over hours.
+ * Nov 11 (long unattended run): what happens in the rebuilt auction house over hours.
  *
  * @param ankunft     new auctions per minute (per rank)
  * @param laufzeitMin new auctions keep coming for this long (minutes)
@@ -114,6 +114,16 @@ data class Szenario(
      * gives them up for a while); afterwards it works again.
      */
     val eingabeKaputtMin: IntRange? = null,
+    /**
+     * Nov 23 (review round 3): share of the Bid windows whose bid field is 1–3 SG higher than Current Bid + 1 (a tap on "+",
+     * a quirk of the game). "Bid" bids what is in the field.
+     */
+    val feldHoeher: Double = 0.0,
+    /**
+     * Nov 23: the digits of the bid field the bot has learned (from the real screenshots: 0, 1, 4, 5, 8, 9) – every other
+     * digit shows as '?' to the bot, as with the real recognizer. null = every digit readable.
+     */
+    val feldZiffern: String? = "014589",
     val erwarteteStopps: Set<StoppGrund> = emptySet(),
 )
 
@@ -136,6 +146,9 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
 
     private val rnd = Random(seed)
 
+    /** Nov 23: own random numbers for the bid field – the other random draws stay exactly as before. */
+    private val feldRnd = Random(seed * 7919 + 17)
+
     class Auktion(val nr: Int, val stufe: String, var preis: Int, val endeUm: Instant, val fremdMax: Int, val sofort: Int? = null) {
         val werte: List<Int> = listOf(1000 + nr % 4000, 5000 + (nr / 4000) % 4000, 20 + nr % 30)
         val id: String = werte.joinToString("-")
@@ -144,6 +157,9 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
         var ueberboten = false
         var inMeineListe = false
         var vorbei = false
+
+        /** Nov 23: our last bid here came from a raised bid field the bot could not see. */
+        var unerkanntErhoeht = false
     }
 
     // ---------------- Market ----------------
@@ -254,6 +270,27 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
     private var dialog: Auktion? = null
     private var dialogSeit: Instant = jetzt
     private var dialogPreisGezeigt = 0
+
+    /** Nov 23 (review round 3): the bid field is this much higher than Current Bid + 1 in the open Bid window (0 = normal). */
+    private var dialogFeldPlus = 0
+
+    /** Nov 23: what was in the bid field when "Bid" was tapped (the amount the game bids after the password / in Confirm). */
+    private var feldBeimTipp = 0
+
+    /** Nov 23: Bid taps with a raised bid field the bot could see on its image (a bug) / could not see (digits not learned). */
+    var feldHoeherGetippt = 0
+        private set
+    var feldHoeherUnerkannt = 0
+        private set
+
+    /** Nov 23: Bid windows with a raised bid field; bids above the rule's highest bid that came from an unseen raised field. */
+    var feldHoeherFenster = 0
+        private set
+    var ueberMaxUnerkannt = 0
+        private set
+    var selbstUeberbotenUnerkannt = 0
+        private set
+    private var feldUnerkanntBeimTipp = false
     private var bietenAus = Ort.MARKT
     private var bestaetigenBetrag = 0
     private var passwortOk = !sz.passwortNoetig
@@ -340,6 +377,18 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
 
     /** The last reload of the list the game accepted. */
     private var letzteAbfrage: Instant? = null
+
+    /**
+     * Nov 23 (review round 3: "navigation taps also reload lists"): taps on a menu entry (My Biddings, Bidding Market) load a
+     * list too – they count for the gap between two reloads ([abfragenZuDicht]); the game itself does not refuse them here.
+     */
+    var navAbfragen = 0
+        private set
+
+    private fun navAbfrage() {
+        navAbfragen++
+        abfrageAngefragt()
+    }
 
     /** Nov 23: every reload of the list the bot asks for – how far after the one before? */
     private fun abfrageAngefragt() {
@@ -745,7 +794,29 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
             }
             if (rnd.nextDouble() >= 0.02) knoepfe[Knopf.SOFORTKAUF] = SOFORT_KNOPF
         }
-        return Bildschirm(Ort.BIETEN, aktuellesGebot = akt, meldung = m, knoepfe = knoepfe, sofortPreis = sofort)
+        // Nov 23 (review round 3): the bid field – Current Bid + 1 (+ a raise), as the recognizer reads it: a band over it →
+        // nothing; now and then nothing readable (more often on the first image of the window); digits not learned yet → '?'.
+        // (Dark digits on white – easier than the light "Current Bid" on brown, which is unreadable on 30 % of the first images.)
+        val feld = a.preis + GEBOTS_SCHRITT + dialogFeldPlus
+        val muster = when {
+            m != null -> null
+            feldRnd.nextDouble() < (if (erst) 0.1 else 0.02) -> null
+            else -> feld.toString().map { if (sz.feldZiffern == null || it in sz.feldZiffern) it else '?' }.joinToString("")
+        }
+        return Bildschirm(
+            Ort.BIETEN, aktuellesGebot = akt, meldung = m, knoepfe = knoepfe, sofortPreis = sofort,
+            bietFeld = muster?.takeIf { '?' !in it }?.toInt(), bietFeldMuster = muster,
+        )
+    }
+
+    /**
+     * Nov 23 (review round 3): could the bot see on [b] that the bid field is not Current Bid + 1? (A learned digit that
+     * differs, or a different number of digits – the same rule as in the bot.)
+     */
+    private fun feldSichtbarFalsch(b: Bildschirm): Boolean {
+        val muster = b.bietFeldMuster ?: return false
+        val soll = ((b.aktuellesGebot ?: return false) + GEBOTS_SCHRITT).toString()
+        return muster.length != soll.length || muster.indices.any { muster[it] != '?' && muster[it] != soll[it] }
     }
 
     private fun bestaetigenBild(): Bildschirm {
@@ -944,11 +1015,11 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
                             }
                             r < 0.67 -> {
                                 ort = Ort.BESTAETIGEN
-                                bestaetigenBetrag = dialog!!.preis + GEBOTS_SCHRITT
+                                bestaetigenBetrag = feldBeimTipp
                             }
                             else -> {
                                 ort = Ort.BIETEN
-                                gebotUndZurueck(dialog!!, dialog!!.preis + GEBOTS_SCHRITT)
+                                gebotUndZurueck(dialog!!, feldBeimTipp)
                             }
                         }
                     }
@@ -982,13 +1053,14 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
             }
             Knopf.MENUE_MEINE_GEBOTE -> {
                 meineGeboteGeoeffnet++
+                navAbfrage() // Nov 23 (review round 3): My Biddings loads its list from the server
                 val laden = rnd.nextDouble() < 0.3
                 uebergang(zwischen(400, 900), { if (laden) Bildschirm(Ort.LADEN) else Bildschirm.UNBEKANNT }) {
                     ort = Ort.MEINE_GEBOTE
                     versatzMeine = 0
                 }
             }
-            Knopf.MENUE_BIETERMARKT, Knopf.MENUE_AUKTIONSMARKT -> Unit
+            Knopf.MENUE_BIETERMARKT, Knopf.MENUE_AUKTIONSMARKT -> navAbfrage()
             null -> {
                 if (b.zeilen.none { it.tippen == p }) {
                     fehltipps++
@@ -1028,6 +1100,7 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
     private fun meineTipp(b: Bildschirm, p: Punkt, knopf: Knopf?) {
         when (knopf) {
             Knopf.MENUE_BIETERMARKT -> {
+                navAbfrage() // Nov 23 (review round 3): back to the Bidding Market reloads the list
                 val sortZurueck = rnd.nextDouble() < 0.2
                 uebergang(zwischen(400, 900), { Bildschirm.UNBEKANNT }) {
                     ort = Ort.MARKT
@@ -1073,6 +1146,9 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
             dialogSeit = jetzt
             bietenAus = aus
             fensterToastBis = null
+            // Nov 23: now and then the bid field is higher than Current Bid + 1 ("+" tapped, a quirk of the game).
+            dialogFeldPlus = if (sz.feldHoeher > 0 && feldRnd.nextDouble() < sz.feldHoeher) feldRnd.nextInt(1, 4) else 0
+            if (dialogFeldPlus > 0) feldHoeherFenster++
             if (rnd.nextDouble() < sz.preisSprung && !a.vorbei) fremdGebot(a) // someone else is bidding right now
         }
     }
@@ -1119,6 +1195,20 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
             fensterMeldung(ZU_OFT, zwischen(2500, 3500))
             return
         }
+        // Nov 23 (review round 3): "Bid" bids what is in the bid field. A raised field the bot could see on its image must never
+        // be bid; one it could not see (digits not learned yet) is counted.
+        feldBeimTipp = dialogPreisGezeigt + GEBOTS_SCHRITT + dialogFeldPlus
+        feldUnerkanntBeimTipp = false
+        if (dialogFeldPlus > 0) {
+            val b = letzter
+            if (b != null && b.ort == Ort.BIETEN && feldSichtbarFalsch(b)) {
+                feldHoeherGetippt++
+                verstoss("Bid tapped although the bid field showed \"${b.bietFeldMuster}\" (Current Bid ${b.aktuellesGebot}, ${a.id})")
+            } else {
+                feldHoeherUnerkannt++
+                feldUnerkanntBeimTipp = true
+            }
+        }
         when {
             // Meanwhile someone else bid or the auction is over → "Bid Failure".
             a.vorbei || a.preis != dialogPreisGezeigt -> {
@@ -1134,13 +1224,13 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
                 passwortEingetragen = false
             }
             rnd.nextDouble() >= sz.ohneBestaetigen -> {
-                val betrag = a.preis + GEBOTS_SCHRITT
+                val betrag = feldBeimTipp
                 uebergang(zwischen(250, 450), { bietenBild() }) {
                     ort = Ort.BESTAETIGEN
                     bestaetigenBetrag = betrag
                 }
             }
-            else -> gebotUndZurueck(a, a.preis + GEBOTS_SCHRITT)
+            else -> gebotUndZurueck(a, feldBeimTipp)
         }
     }
 
@@ -1205,7 +1295,7 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
 
     private fun confirmGetippt() {
         val a = dialog ?: return
-        if (a.vorbei || a.preis + GEBOTS_SCHRITT != bestaetigenBetrag) {
+        if (a.vorbei || bestaetigenBetrag <= a.preis) {
             bidFehlschlaege++
             schliessenNachGebot(FEHLSCHLAG, 1500)
             return
@@ -1214,6 +1304,12 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
     }
 
     private fun gebotUndZurueck(a: Auktion, betrag: Int) {
+        // Nov 23: the amount from the bid field is no longer above the price (someone bid meanwhile) → "Bid Failure".
+        if (betrag <= a.preis) {
+            bidFehlschlaege++
+            schliessenNachGebot(FEHLSCHLAG, 1500)
+            return
+        }
         if (platzieren(a, betrag)) schliessenNachGebot(ERFOLG, zwischen(2000, 2700)) else schliessenNachGebot(FEHLSCHLAG, 1500)
     }
 
@@ -1224,7 +1320,7 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
         toast = m
         toastBis = jetzt.plusMillis(meldungMs)
         // Nov 11 (review): "Bidding successful" often already lies over the Bid window that is closing; and on a
-        // slow network (school) the window only closes after a few seconds.
+        // slow mobile network the window only closes after a few seconds.
         val mitMeldung = m == ERFOLG && rnd.nextDouble() < 0.5
         val zuMs = if (rnd.nextDouble() < sz.langsamesNetz) zwischen(1500, 6000) else zwischen(150, 700)
         uebergang(zuMs, { bietenBild().let { b -> if (mitMeldung && toastBis?.isAfter(jetzt) == true) b.copy(meldung = ERFOLG) else b } }) {
@@ -1243,17 +1339,36 @@ class DauerSpiel(seed: Long, var jetzt: Instant, private val sz: Szenario) : Bil
         if (regel == null) {
             verstoss("bid on ${a.stufe} without a rule (${a.id})")
         } else {
-            if (betrag > regel.hoechstesGebot) verstoss("bid $betrag SG above the highest bid ${regel.hoechstesGebot} (${a.id})")
+            if (betrag > regel.hoechstesGebot) {
+                // Nov 23 (review round 3): a raised bid field the bot could NOT see (digits not learned yet) is measured, not
+                // counted as a bug of the bot – the scenarios with raised fields report it ([ueberMaxUnerkannt]).
+                if (feldUnerkanntBeimTipp && betrag == feldBeimTipp) {
+                    ueberMaxUnerkannt++
+                    hinweise += "${uhr(jetzt)} bid $betrag SG above the highest bid ${regel.hoechstesGebot} – raised bid field not readable (${a.id})"
+                } else {
+                    verstoss("bid $betrag SG above the highest bid ${regel.hoechstesGebot} (${a.id})")
+                }
+            }
             regel.maxRestzeitMin?.let { m ->
                 val r = restSek(a)
                 if (r > m * 60 + 10) verstoss("bid with $r s remaining, rule: only last $m min (${a.id})")
             }
         }
-        if (a.ichVorne) verstoss("outbid our own leading bid (${a.id}, $betrag SG)")
+        if (a.ichVorne) {
+            // Nov 23 (review round 3): our leading bid came from a raised bid field the bot could not see – its bookkeeping
+            // holds a lower amount, so a row without an icon looks outbid. Measured like the raise itself, not a bug.
+            if (a.unerkanntErhoeht) {
+                selbstUeberbotenUnerkannt++
+                hinweise += "${uhr(jetzt)} outbid our own leading bid (${a.id}, $betrag SG) – it came from a raised bid field not readable"
+            } else {
+                verstoss("outbid our own leading bid (${a.id}, $betrag SG)")
+            }
+        }
         if (betrag > sg) {
             verstoss("bid $betrag SG, but only $sg SG available")
             return false
         }
+        a.unerkanntErhoeht = feldUnerkanntBeimTipp && betrag == feldBeimTipp
         sz.sgBudget?.let { b ->
             // Nov 23: SG topped up during the run do not count as budget (net spending of this run).
             val verplant = startSg + aufgeladen - (sg - betrag)

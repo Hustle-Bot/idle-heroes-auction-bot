@@ -192,7 +192,9 @@ class SpielBremseTest {
     }
 
     @Test
-    fun `Bidding successful and Bid Failure - the bot bids through them right away, as before`() {
+    fun `Bidding successful and Bid Failure - the bot taps the row through them right away, Bid only once the band is gone`() {
+        // Nov 23 (review round 3): over the list as before (no pause, the row is tapped through the band); in the Bid window
+        // the band lies over the Bid button – Bid only after it is gone (a real toast lasts 2–3 s).
         for (m in listOf(Meldung(1224), Meldung(1542), Meldung(1530, yOben = 510, yUnten = 706))) {
             val spiel = SpielAttrappe(start)
             spiel.zeile("C-", 15, 200, 1, 1, 1)
@@ -200,11 +202,13 @@ class SpielBremseTest {
             val aktionen = ArrayList<Pair<Instant, String>>()
             val bot = AuktionsBot(listOf(cMinus), StoppBedingung(), huelle)
             bisBereit(bot, spiel, aktionen)
-            huelle.zeige(m, 20_000)
+            huelle.zeige(m, 2500)
             val e = schritt(bot, spiel, aktionen)
             assertTrue(e is Ergebnis.Handeln && e.aktion.grund.startsWith("bid C-"), "$m: $e")
             repeat(100) { if (spiel.gebotePreise.isEmpty()) schritt(bot, spiel, aktionen) }
             assertEquals(listOf(16), spiel.gebotePreise, "$m")
+            val bid = aktionen.single { it.second.startsWith("Bid for") }
+            assertTrue(!bid.first.isBefore(huelle.bis), "$m: Bid only after the band was gone (${huelle.bis}): $bid")
             assertEquals(null, bot.zuOftPauseBis)
         }
     }
@@ -291,7 +295,9 @@ class SpielBremseTest {
     }
 
     @Test
-    fun `known messages in the Bid window - Bid Failure and Bidding successful - Bid at the learned position as before, no pause`() {
+    fun `known messages in the Bid window - Bid Failure and Bidding successful - never Bid under them, no pause, X if they stay`() {
+        // Nov 23 (review round 3: "any two-line band counts as Bid Failure"): before, Bid was tapped at its learned position
+        // under these bands. Now never – the bot waits; a band that stays closes the window with the X (no pause, no stop).
         for (m in listOf(Meldung(1542, yOben = 470, yUnten = 700), Meldung(1224, yOben = 537, yUnten = 681))) {
             val spiel = SpielAttrappe(start)
             spiel.mitBestaetigen = false
@@ -299,16 +305,27 @@ class SpielBremseTest {
             spiel.zeile("C-", 17, 210, 2, 2, 2)
             val huelle = MitMeldung(spiel)
             val aktionen = ArrayList<Pair<Instant, String>>()
-            val bot = AuktionsBot(listOf(cMinus), StoppBedingung(), huelle)
+            val log = ArrayList<String>()
+            val bot = AuktionsBot(listOf(cMinus), StoppBedingung(), huelle, protokoll = { log += it })
             ersterBidGelernt(bot, spiel, aktionen)
             huelle.nurAuf = setOf(Ort.BIETEN)
             huelle.bidVerdeckt = true
             huelle.zeige(m, 600_000)
-            repeat(300) { if (spiel.gebotePreise.size < 2) schritt(bot, spiel, aktionen) }
-            assertEquals(listOf(16, 18), spiel.gebotePreise, "$m: $aktionen")
-            assertTrue(aktionen.any { it.second == "Bid for 18 SG (learned position, message on top)" }, "$m: $aktionen")
+            val t0 = spiel.jetzt
+            var e: Ergebnis = Ergebnis.Pausiert
+            while (Duration.between(t0, spiel.jetzt).toSeconds() < 40 && e !is Ergebnis.Fertig) e = schritt(bot, spiel, aktionen)
+            assertTrue(e !is Ergebnis.Fertig, "$m: $e")
+            assertEquals(listOf(16), spiel.gebotePreise, "$m: never Bid under the band: $aktionen")
+            assertTrue(aktionen.none { it.second.contains("learned position") }, "$m: $aktionen")
+            assertTrue(aktionen.any { it.second == "close Bid window (message over the Bid button)" }, "$m: $aktionen")
+            assertTrue(log.any { it.startsWith("A message has been lying over the Bid button for 10 s") }, "$m: " + log.joinToString("\n"))
             assertEquals(0, bot.zuOftMeldungen, "$m")
             assertEquals(null, bot.zuOftPauseBis, "$m")
+            assertTrue(spiel.obenGetippt.isEmpty(), "$m: ${spiel.obenGetippt}")
+            // Band gone → the next Bid window is bid as usual (row 2 is locked for 60 s after the close).
+            huelle.bis = spiel.jetzt
+            repeat(400) { if (spiel.gebotePreise.size < 2) schritt(bot, spiel, aktionen) }
+            assertEquals(listOf(16, 18), spiel.gebotePreise, "$m")
         }
     }
 

@@ -24,7 +24,10 @@ computer, see below). The public build has **no internet permission at all**.
 - Sets the game's own **filter** (tier and min/max price), sorts the list, and **scrolls the Bidding Market** by itself.
 - Opens a copy only if its **Bidding Price fits one of your rules** (for example "C-, filter 10-20 SG").
 - Checks **Current Bid** in the Bid window and taps **only "Bid"**. The bid is never higher than your rule's
-  maximum price + 1 SG.
+  maximum price + 1 SG. Before tapping "Bid" it also **checks the number in the bid field** (next to "-" and "+"): if it
+  shows more than Current Bid + 1, it closes the window instead and never changes the field. (Some digits of that field
+  are not learned yet; when it cannot read the field, it bids as before, on the checked Current Bid.)
+  It never taps "Bid" while a message lies over the window.
 - Handles the **"-7" message** (the game's limit of 50 active bids): it cleans up *My Biddings*, bids again on
   outbid rows if the price still fits, and dismisses the others with the red X. When the *Bidding Items* counter is
   below 50 again, it keeps bidding.
@@ -33,7 +36,8 @@ computer, see below). The public build has **no internet permission at all**.
   number of copies**. The budget is **per run, net SG spent** (bought copies plus running bids; outbid bids give their SG
   back; SG you add during the run do not raise it).
 - **Never taps the purchase "+" in the top bar** and **never acts on an old screenshot**.
-- **Respects the game's rate limit:** **at most one list reload every 5 s, always** (refresh, filter, sort order); after
+- **Respects the game's rate limit:** **at most one list reload every 5 s, always** (refresh, filter, sort order, and the
+  menu taps to *Bidding Market* / *My Biddings*); after
   "Operated too frequently" it taps nothing for 5 s (longer if it repeats, stops after 5 in a row), and when there is
   nothing to bid it refreshes the list at most every 5-15 s. A message it does not know in the Bid window pauses it, and it
   never taps under it.

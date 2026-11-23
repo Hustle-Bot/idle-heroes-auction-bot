@@ -63,6 +63,8 @@ data class Erwartet(
     val sortierung: Sortierung? = null,
     /** Nov 11: filter window – how many characters are in the min and max price fields (null = do not check). */
     val filterStellen: Pair<Int, Int>? = null,
+    /** Nov 23 (review round 3): Bid window – the number in the bid field next to "−"/"+" (null = do not check). */
+    val bietFeld: Int? = null,
 )
 
 object Ablesung {
@@ -247,14 +249,14 @@ object Ablesung {
             ),
         ),
         Erwartet("meine-gebote-leer", Ort.MEINE_GEBOTE, sg = 20704, zaehler = 0),
-        Erwartet("bid-fenster", Ort.BIETEN, aktuellesGebot = 18, lernen = true),
+        Erwartet("bid-fenster", Ort.BIETEN, aktuellesGebot = 18, bietFeld = 19, lernen = true),
         Erwartet("limit-50-status-7", Ort.BIETEN, aktuellesGebot = 62, meldung = true, meldungKurz = true, lernen = true),
         // Nov 9 (field test 1.7): saved by the bot itself when it did NOT recognize the window –
         // B- without buyout ("Buyout Price: --", gray Buyout button), IH button on the left of the image.
-        Erwartet("bid-fenster-b-ohne-buyout-1", Ort.BIETEN, aktuellesGebot = 53, lernen = true),
-        Erwartet("bid-fenster-b-ohne-buyout-2", Ort.BIETEN, aktuellesGebot = 53, lernen = true),
+        Erwartet("bid-fenster-b-ohne-buyout-1", Ort.BIETEN, aktuellesGebot = 53, bietFeld = 54, lernen = true),
+        Erwartet("bid-fenster-b-ohne-buyout-2", Ort.BIETEN, aktuellesGebot = 53, bietFeld = 54, lernen = true),
         // Nov 9 (field test 1.8): "Current Bid not readable" – Current Bid 53, field 54, ends 00:31:20.
-        Erwartet("bid-fenster-b-ohne-buyout-3", Ort.BIETEN, aktuellesGebot = 53, lernen = true),
+        Erwartet("bid-fenster-b-ohne-buyout-3", Ort.BIETEN, aktuellesGebot = 53, bietFeld = 54, lernen = true),
         Erwartet("bestaetigen-18", Ort.BESTAETIGEN, bestaetigen = 18, lernen = true),
         Erwartet("bestaetigen-17", Ort.BESTAETIGEN, bestaetigen = 17, lernen = true),
         Erwartet("filter-fenster", Ort.FILTER, filterGewaehlt = listOf("C-"), meldung = null),

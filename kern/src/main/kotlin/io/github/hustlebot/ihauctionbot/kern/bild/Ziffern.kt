@@ -28,6 +28,12 @@ enum class Schrift {
 
     /** Brown: "Starry Gems spent: 18" in the confirm window. */
     BRAUN,
+
+    /**
+     * Nov 23 (review round 3): thin brown digits on the white input fields – the bid field in the Bid window ("54" next to
+     * "Current Bid: 53") and the price fields of the filter window (same font and size, ~25 px high).
+     */
+    FELD,
     ;
 
     /** Does this pixel belong to the fill of a digit? */
@@ -40,6 +46,8 @@ enum class Schrift {
         GRUEN -> g > 165 && g - r > 40 && g - b > 70
         ROT -> r in 100..215 && g < 110 && b < 110 && r - g > 50
         BRAUN -> (r * 30 + g * 59 + b * 11) / 100 < 125 && r > g && r - b > 40
+        // Fill ~(140, 100, 72) with soft edges on pure white; the white of the field (≥ 240) never counts.
+        FELD -> (r * 30 + g * 59 + b * 11) / 100 < 200 && r > g && r - b > 25
     }
 }
 

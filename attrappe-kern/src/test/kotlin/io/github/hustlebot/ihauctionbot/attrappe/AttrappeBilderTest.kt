@@ -111,6 +111,14 @@ class AttrappeBilderTest {
         for (preis in listOf(10, 14, 17, 19, 20, 21, 23, 47, 59, 60, 99, 109)) {
             assertEquals(preis, Erkenner.erkenne(bauer.bieten(preis, minus7 = false)).aktuellesGebot, "Current Bid $preis")
         }
+        // Nov 23 (review round 3): the bid field shows Current Bid + 1 – drawn from the real digits 0, 1, 4, 5, 8, 9 and read
+        // back exactly; with another digit the field stays empty (nothing read, the bot bids as before).
+        assertEquals(19, b.bietFeld)
+        for ((preis, feld) in listOf(10 to 11, 13 to 14, 17 to 18, 18 to 19, 40 to 41, 53 to 54, 58 to 59, 99 to 100, 20 to null, 52 to null)) {
+            val s = Erkenner.erkenne(bauer.bieten(preis, minus7 = false))
+            assertEquals(feld, s.bietFeld, "bid field at Current Bid $preis")
+            assertEquals(feld?.toString(), s.bietFeldMuster, "bid field at Current Bid $preis")
+        }
         val m = Erkenner.erkenne(bauer.bieten(16, minus7 = true))
         assertTrue(m.meldung?.kurz == true && m.meldung!!.wieLimit, "${m.meldung}")
         val f = Erkenner.erkenne(bauer.filter("10", "20"))

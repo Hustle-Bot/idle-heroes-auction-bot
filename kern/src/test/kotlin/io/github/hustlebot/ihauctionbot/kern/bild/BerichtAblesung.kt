@@ -161,6 +161,7 @@ object BerichtAblesung {
             "berichte/20-42-45_bild_16",
             Ort.BIETEN,
             aktuellesGebot = 54,
+            bietFeld = 55,
             meldung = false,
         ),
         Erwartet(
@@ -301,6 +302,7 @@ object BerichtAblesung {
             "berichte/21-46-15_bild_20",
             Ort.BIETEN,
             aktuellesGebot = 57,
+            bietFeld = 58,
             meldung = false,
         ),
         Erwartet(
@@ -403,6 +405,7 @@ object BerichtAblesung {
             "berichte/19-33-55_bild_09",
             Ort.BIETEN,
             aktuellesGebot = 54,
+            bietFeld = 55,
             meldung = false,
         ),
         Erwartet(
@@ -415,6 +418,7 @@ object BerichtAblesung {
             "berichte/19-33-55_bild_11",
             Ort.BIETEN,
             aktuellesGebot = 54,
+            bietFeld = 55,
             meldung = false,
         ),
         Erwartet(
@@ -466,18 +470,21 @@ object BerichtAblesung {
             "berichte/19-39-28_bild_01",
             Ort.BIETEN,
             aktuellesGebot = 52,
+            bietFeld = 53,
             meldung = true,
         ),
         Erwartet(
             "berichte/19-39-28_bild_02",
             Ort.BIETEN,
             aktuellesGebot = 52,
+            bietFeld = 53,
             meldung = true,
         ),
         Erwartet(
             "berichte/19-39-28_bild_03",
             Ort.BIETEN,
             aktuellesGebot = 52,
+            bietFeld = 53,
             meldung = false,
         ),
         Erwartet(
@@ -573,6 +580,7 @@ object BerichtAblesung {
             "berichte/19-39-28_bild_12",
             Ort.BIETEN,
             aktuellesGebot = 51,
+            bietFeld = 52,
             meldung = false,
         ),
         Erwartet(
@@ -642,6 +650,7 @@ object BerichtAblesung {
             "berichte/19-39-28_bild_19",
             Ort.BIETEN,
             aktuellesGebot = 56,
+            bietFeld = 57,
             meldung = false,
         ),
         Erwartet(

@@ -26,6 +26,7 @@ class ErkennerTest {
             e.zaehler?.let { assertEquals(it, s.laufendeGebote, "${e.name}: Bidding Items") }
             e.aktuellesGebot?.let { assertEquals(it, s.aktuellesGebot, "${e.name}: Current Bid") }
             e.bestaetigen?.let { assertEquals(it, s.bestaetigenPreis, "${e.name}: Starry Gems spent") }
+            e.bietFeld?.let { assertEquals(it, s.bietFeld, "${e.name}: bid field") }
             when (e.meldung) {
                 true -> {
                     assertNotNull(s.meldung, "${e.name}: message missing")

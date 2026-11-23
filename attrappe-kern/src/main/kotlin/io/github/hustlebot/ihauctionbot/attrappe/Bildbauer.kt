@@ -82,6 +82,11 @@ class Bildbauer(val atlas: Atlas) {
         l.fuelle(f.x0, f.y0, f.x1, f.y1) { _, _ -> grund }
         val text = aktuell?.toString()
         if (text != null && atlas.aktuell.kann(text)) zahl(l, atlas.aktuell, text, atlas.aktuellStart.first, atlas.aktuellStart.second)
+        // Nov 23 (review round 3): the bid field shows Current Bid + 1, as in the game (the template still had "19"). Only
+        // digits from real screenshots – a number with another digit leaves the field empty (the bot then bids as before).
+        feldLeeren(l, BIET_FELD_INNEN)
+        val feld = aktuell?.plus(1)?.toString()
+        if (feld != null && atlas.feld.kann(feld)) zahl(l, atlas.feld, feld, atlas.feldStart.first, atlas.feldStart.second)
         if (minus7) l.male(atlas.limitMeldung.second, 1356 - atlas.limitMeldung.second.breite / 2, atlas.limitMeldung.first)
         return l.alsBild()
     }
@@ -212,6 +217,9 @@ class Bildbauer(val atlas: Atlas) {
         /** Buttons in the secondary password window: "Forgot Password" (left, forbidden) and "Verify" (right). */
         val PASSWORT_VERGESSEN = Rechteck(850, 720, 1330, 860)
         val PASSWORT_OK = Rechteck(1380, 720, 1860, 860)
+
+        /** Nov 23: the white inside of the bid field in the Bid window (measured on bid-fenster.jpg). */
+        val BIET_FELD_INNEN = Rechteck(1512, 518, 1772, 594)
 
         /** Inner areas of the price fields in the filter window (that is where the recognizer counts the characters). */
         val FILTER_MIN = Rechteck(1026, 550, 1280, 620)

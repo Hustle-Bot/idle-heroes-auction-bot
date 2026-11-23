@@ -54,6 +54,8 @@ class BerichtBilderTest {
             e.zaehler?.let { z.zahl("Bidding Items", it, s.laufendeGebote, n) }
             e.aktuellesGebot?.let { z.zahl("Current Bid", it, s.aktuellesGebot, n) }
             e.bestaetigen?.let { z.zahl("Starry Gems spent", it, s.bestaetigenPreis, n) }
+            // Nov 23 (review round 3): the bid field (half resolution: usually not readable, but never wrong).
+            e.bietFeld?.let { z.zahl("bid field", it, s.bietFeld, n) }
             when (e.meldung) {
                 true -> z.struktur("message", s.meldung != null && s.meldung!!.kurz == e.meldungKurz) { "$n: ${s.meldung} (short expected: ${e.meldungKurz})" }
                 false -> z.struktur("message", s.meldung == null) { "$n: ${s.meldung} instead of none" }

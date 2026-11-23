@@ -397,6 +397,8 @@ class SpielAttrappe(var jetzt: Instant) : BildschirmLeser {
                 else -> null
             },
             sofortPreis = dialog!!.sofort?.let(sofortAnzeige),
+            // Nov 23 (review round 3): the bid field – Current Bid + 1, nothing readable under a band (as on the real images).
+            bietFeld = if (meldungKurz || toastBis?.isAfter(jetzt) == true) null else bietFeldAnzeige(dialog!!.preis + 1),
             knoepfe = mapOf(Knopf.BIETEN to Punkt(1641, 690), Knopf.SCHLIESSEN to Punkt(2105, 108)) +
                 (if (dialog!!.sofort != null && sofortKnopfGelb) mapOf(Knopf.SOFORTKAUF to SOFORT_KNOPF) else emptyMap()),
         )
@@ -503,6 +505,9 @@ class SpielAttrappe(var jetzt: Instant) : BildschirmLeser {
 
     /** What the bot reads as "Current Bid". */
     var currentBidAnzeige: (Int) -> Int? = { it }
+
+    /** Nov 23 (review round 3): what the bid field of the Bid window shows (argument: Current Bid + 1; null = not readable). */
+    var bietFeldAnzeige: (Int) -> Int? = { it }
 
     /** The red X in the confirm window does not work. */
     var bestaetigenXKlemmt = false
@@ -945,7 +950,9 @@ class AuktionsBotTest {
         assertTrue(log.any { it.contains("no remaining time readable") && it.contains("bidding again from") }, log.joinToString("\n"))
         val ab = bot.gebote.wiederBietenAb!!
         val warten = java.time.Duration.between(spiel.jetzt, ab).toMillis()
-        assertTrue(warten in 59_000..60_000, "without remaining time: wait 60 s ($warten ms)")
+        // Nov 23 (review round 3): the tap back to the Bidding Market waits for the 5 s gap after the tap on My Biddings
+        // (both load a list) – the 60 s count from the decision in My Biddings, so a few seconds of them are already over.
+        assertTrue(warten in 54_000..60_000, "without remaining time: wait 60 s ($warten ms)")
         // Until then open nothing and do not bid.
         val vorher = spiel.geoeffnet.size
         laufen(bot, spiel, 400) { !spiel.jetzt.isBefore(ab.minusSeconds(1)) }

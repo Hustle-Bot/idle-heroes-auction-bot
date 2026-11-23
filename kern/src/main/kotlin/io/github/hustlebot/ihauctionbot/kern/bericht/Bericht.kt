@@ -106,6 +106,9 @@ object BerichtJson {
         append(",\"bestaetigenPreis\":").append(n(s.bestaetigenPreis))
         // Nov 22 (buyout): "Buyout Price: N" in the Bid window.
         append(",\"sofortPreis\":").append(n(s.sofortPreis))
+        // Nov 23 (review round 3): the number in the bid field of the Bid window (what "Bid" really bids).
+        append(",\"bietFeld\":").append(n(s.bietFeld))
+        append(",\"bietFeldMuster\":").append(s.bietFeldMuster?.let { t(it) } ?: "null")
         append(",\"meldung\":").append(s.meldung?.let { "{\"breite\":${it.breite},\"kurz\":${it.kurz}}" } ?: "null")
         append(",\"sortierung\":").append(t(s.sortierung.name))
         append(",\"filterMinStellen\":").append(n(s.filterMinStellen))

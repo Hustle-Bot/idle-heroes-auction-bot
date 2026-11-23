@@ -38,7 +38,10 @@ enum class StoppGrund(val text: String, val sperren: Boolean) {
     ZWEITPASSWORT_FALSCH("Wrong secondary password? The game did not accept it", true),
     ZWEITPASSWORT_EINGABE("Could not enter the secondary password", true),
 
-    /** Nov 9: "Lost connection with game server." → just stop (tap nothing), screen off. */
+    /**
+     * Nov 9: "Lost connection with game server." → stop, screen off. Nov 22: only after the reconnects allowed per run are
+     * used up (or with 0 allowed), or when Confirm / the auction house does not come back (see AuktionsBot `verbindungWeg`).
+     */
     VERBINDUNG_WEG("Lost connection to the game – bot stopped", true),
 
     /**

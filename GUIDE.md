@@ -307,9 +307,15 @@ but automation is probably against the game's rules. Your risk.
 
 **Does it need internet?** The app does not. (The game, of course, does.)
 
-**Does it flood the game with requests?** No. It reloads the list (refresh, filter, sort order) **at most once every 5 seconds,
-always**, respects the game's "Operated too frequently" message (it pauses, longer each time, and stops after 5 in a row),
+**Does it flood the game with requests?** No. It reloads a list (refresh, filter, sort order, menu taps to *Bidding Market* or
+*My Biddings*) **at most once every 5 seconds, always**, respects the game's "Operated too frequently" message (it pauses, longer each time, and stops after 5 in a row),
 and when there is nothing to bid it refreshes the list at most every 5-15 seconds.
+
+**What does it check before tapping "Bid"?** The **Current Bid** (at most your rule's max price) and the **number in the
+bid field** next to "-" and "+" (that is what "Bid" really bids). If the field shows more than Current Bid + 1 - for
+example because someone tapped "+" - it closes the window with the red X and never changes the field itself. Some digits of
+that field are not learned yet (2, 3, 6, 7); if it cannot read the field, it bids as before, on the checked Current Bid.
+It never taps "Bid" while a message lies over the window; it waits until the message is gone.
 
 **How is the SG budget counted?** Per run, as **net SG spent**: copies bought plus bids that are still running. If you are
 outbid, the SG come back and can be used again. SG you add during the run do not raise the budget.

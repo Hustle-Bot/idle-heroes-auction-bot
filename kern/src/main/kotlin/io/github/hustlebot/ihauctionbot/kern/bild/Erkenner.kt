@@ -379,12 +379,17 @@ object Erkenner {
 
     private fun bietenFenster(b: Bild): Bildschirm {
         val aktuell = ZiffernLeser.zahl(b, AKTUELLES_GEBOT_FELD, Schrift.HELL)
+        val muster = bietFeldMuster(b)
+        val feld = muster?.takeIf { '?' !in it }?.toIntOrNull()
         return Bildschirm(
             Ort.BIETEN,
             meldung = meldung(b),
             aktuellesGebot = aktuell,
             // Nov 22 (buyout): "Buyout Price: N" (null when "--" or not readable).
             sofortPreis = ZiffernLeser.zahl(b, SOFORT_PREIS_FELD, Schrift.HELL),
+            // Nov 23 (review round 3): the number in the bid field – the amount "Bid" really bids.
+            bietFeld = feld,
+            bietFeldMuster = muster,
             // Nov 9: only offer the "Bid" button if it was really found.
             // Nov 22: the "Buyout Price" button only when it is yellow on this screenshot.
             knoepfe = listOfNotNull(
@@ -392,12 +397,53 @@ object Erkenner {
                 sofortKnopf(b)?.let { Knopf.SOFORTKAUF to it },
                 Knopf.SCHLIESSEN to Punkt(2105, 108),
             ).toMap(),
-            unlesbar = listOfNotNull(if (aktuell == null) unlesbar(b, AKTUELLES_GEBOT_FELD, Schrift.HELL, "aktuellesGebot", "bid-fenster") else null),
+            // Nov 23: an unreadable bid field goes into the learning images too (digits 2, 3, 6, 7 are not learned yet);
+            // "Current Bid" in the name says what should be in the field (one more).
+            unlesbar = listOfNotNull(
+                if (aktuell == null) unlesbar(b, AKTUELLES_GEBOT_FELD, Schrift.HELL, "aktuellesGebot", "bid-fenster") else null,
+                if (feld == null && feldWeiss(b)) unlesbar(b, BIET_FELD, Schrift.FELD, "bietFeld", "bid-fenster_aktuell-${aktuell ?: "x"}") else null,
+            ),
         )
     }
 
     /** "Current Bid: 53" – only the number after the colon. */
     val AKTUELLES_GEBOT_FELD = Rechteck(1438, 422, 1600, 480)
+
+    /**
+     * Nov 23 (review round 3: "the bot assumes the field holds Current Bid + 1"): the editable bid field between "−" and "+"
+     * (white inside x 1512–1771, y 518–593 on the real screenshots; the number is left-aligned from x ≈ 1517, ~25 px high),
+     * digit by digit – a learned digit where it is certain (distance at most [FELD_SCHWELLE]), '?' for a digit that is there
+     * but not learned yet (2, 3, 6, 7 – on the real images the nearest other digit is ≥ 0.2 away, the same digit ≤ 0.001).
+     * Example "5?" for 53. So a raised field is often seen even when the whole
+     * number is not readable ("58" instead of "53"). null = no white field (a message band lies over it), nothing in it, or
+     * a piece of a digit lies next to the digits (lost digit) – the bot never guesses.
+     */
+    internal fun bietFeldMuster(b: Bild): String? {
+        if (!feldWeiss(b)) return null
+        val z = ZiffernLeser.zerlege(b, BIET_FELD, Schrift.FELD)
+        if (z.glyphen.isEmpty() || z.glyphen.size > 7 || ZiffernLeser.resteVerdaechtig(z)) return null
+        // Narrower than a "1" (7–8 px): not a digit (e.g. a text cursor) – then nothing in the field counts.
+        if (z.glyphen.any { it.breite < FELD_MIN_BREITE }) return null
+        return z.glyphen.joinToString("") { g ->
+            val (ziffer, abstand) = ZiffernLeser.vergleiche(g, Schrift.FELD) ?: ('?' to 1f)
+            if (abstand <= FELD_SCHWELLE) ziffer.toString() else "?"
+        }
+    }
+
+    /** Nov 23: a digit in the bid field counts only this close to a learned one (stricter than [ZiffernLeser.SCHWELLE]). */
+    const val FELD_SCHWELLE = 0.03f
+    private const val FELD_MIN_BREITE = 5
+
+    /** Only the inside of the bid field (without its brown border). */
+    val BIET_FELD = Rechteck(1513, 522, 1700, 592)
+
+    /**
+     * The bid field is white around the number (above and below it, and on the right where even a 7-digit number does
+     * not reach). A message band over the window darkens it – then nothing in it is read.
+     */
+    private fun feldWeiss(b: Bild): Boolean = FELD_WEISS.all { (x, y) -> b.farbe(x, y).hell > 235 }
+
+    private val FELD_WEISS = listOf(Punkt(1516, 528), Punkt(1600, 530), Punkt(1700, 586), Punkt(1560, 586), Punkt(1755, 557))
 
     private fun bestaetigenFenster(b: Bild): Bildschirm {
         val betrag = bestaetigenPreis(b)

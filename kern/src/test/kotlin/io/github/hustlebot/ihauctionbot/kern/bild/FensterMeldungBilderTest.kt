@@ -126,6 +126,8 @@ class FensterMeldungBilderTest {
         bild = echt
         val e = bot.schritt(t)
         assertEquals(bidPunkt, getippt(e), "$e – ${log.takeLast(3)}")
-        assertTrue((e as Ergebnis.Handeln).aktion.grund == "Bid for 54 SG", e.aktion.grund)
+        // Nov 23 (review round 3): the real image shows "54" in the bid field – checked before the tap.
+        assertEquals("Bid for 54 SG (bid field 54 checked)", (e as Ergebnis.Handeln).aktion.grund)
+        assertEquals(1, bot.bietFeldGeprueft)
     }
 }

@@ -23,6 +23,8 @@ object Lernziffern {
                 "aktuell" -> Schrift.HELL
                 "bestaetigen" -> Schrift.BRAUN
                 "wert" -> Schrift.ROT
+                // Nov 23 (review round 3): the bid field in the Bid window (crops "..._feld_54.png").
+                "feld" -> Schrift.FELD
                 else -> error("unknown kind $art")
             }
         val minHoehe: Int get() = if (art == "bestaetigen" || art == "wert") 16 else 14
