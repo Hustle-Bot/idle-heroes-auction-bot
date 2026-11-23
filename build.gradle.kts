@@ -11,7 +11,7 @@ buildscript {
         gradlePluginPortal()
     }
     dependencies {
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.21")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21")
         if (androidDa) classpath("com.android.tools.build:gradle:8.10.1")
     }
 }
