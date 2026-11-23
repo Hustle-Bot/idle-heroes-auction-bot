@@ -78,7 +78,7 @@ dependencies {
     // That keeps the app at a few MB instead of ~50 MB.
     // ML Kit is back as a SECOND opinion for numbers the core cannot read – this time through
     // Google Play services ("unbundled"): Android downloads the recognition model itself, the app stays small.
-    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.2")
     // Public app: FileProvider for sharing a report through Android's share sheet.
     "ossImplementation"("androidx.core:core:1.13.1")
 }
