@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Build
 import io.github.hustlebot.ihauctionbot.kern.Bildschirm
+import io.github.hustlebot.ihauctionbot.kern.BuyoutFreigabe
 import io.github.hustlebot.ihauctionbot.kern.Ergebnis
 import io.github.hustlebot.ihauctionbot.kern.bericht.BerichtJson
 import io.github.hustlebot.ihauctionbot.kern.bericht.BerichtNamen
@@ -14,6 +15,7 @@ import io.github.hustlebot.ihauctionbot.kern.bericht.FlugEreignisBremse
 import io.github.hustlebot.ihauctionbot.kern.bericht.FlugschreiberNamen
 import io.github.hustlebot.ihauctionbot.kern.bericht.FlugschreiberRegeln
 import io.github.hustlebot.ihauctionbot.kern.bild.Bild
+import io.github.hustlebot.ihauctionbot.kern.bild.Rechteck
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -46,6 +48,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * as soon as the report at the end of the run is built; reports and saved screenshots older than [AUFBEWAHREN_MS]
  * are deleted; "Delete reports, log and screenshots" in the settings removes everything at once ([allesLoeschen]).
  * Only screenshots that may be kept get here at all (game alone in front, see BotDienst).
+ * Review round 3 (Nov 23): the log keeps no line older than 14 days ([BotZustand.protokollAufraeumen]); the flight
+ * recorder's screenshots left behind by a crash are deleted ([resteLoeschen]); saved screenshots are black outside the
+ * game and under other windows ([Schwaerzen]).
  */
 object BerichtSender {
 
@@ -135,17 +140,19 @@ object BerichtSender {
      * [erwartetesGebot]: what the bot wants to bid right now – goes into the file name for "Current Bid" (bid − 1) and
      * for the amount in the confirm window, so that when learning it is clear which number should be there.
      */
-    private fun merkeLernbilder(gesehen: Bild, schirm: Bildschirm, erwartetesGebot: Int?) {
+    private fun merkeLernbilder(gesehen: Bild, schirm: Bildschirm, erwartetesGebot: Int?, schwarz: List<Rechteck>) {
         var n = 0
         for (u in schirm.unlesbar) {
             if (n >= LERNBILDER_JE_FOTO) break
-            val neu = synchronized(lernStellen) { lernStellen.add(u.feld + "|" + u.kontext) }
-            if (!neu) continue
             val x0 = u.x0.coerceIn(0, gesehen.breite - 1)
             val y0 = u.y0.coerceIn(0, gesehen.hoehe - 1)
             val b = (u.x1.coerceIn(0, gesehen.breite) - x0)
             val h = (u.y1.coerceIn(0, gesehen.hoehe) - y0)
             if (b <= 0 || h <= 0) continue
+            // Review round 3 (Nov 23): a number under another window (e.g. a chat head) is not kept as a learning image.
+            if (Schwaerzen.trifft(x0, y0, x0 + b, y0 + h, schwarz)) continue
+            val neu = synchronized(lernStellen) { lernStellen.add(u.feld + "|" + u.kontext) }
+            if (!neu) continue
             try {
                 val ausschnitt = Bitmap.createBitmap(gesehen.pixel, y0 * gesehen.breite + x0, gesehen.breite, b, h, Bitmap.Config.ARGB_8888)
                 val aus = ByteArrayOutputStream()
@@ -170,6 +177,8 @@ object BerichtSender {
      * waiting there, this one is skipped (the line in the flight recorder stays).
      * [schirm] = what the recognition saw in EXACTLY this screenshot (null = not read), [ergebnis] = what the bot then
      * wanted. [erlaubt] = false (secondary password, shortly after the input, not read): no screenshot, only the line.
+     * Review round 3 (Nov 23): [schwarz] = what is blacked out in the saved copy (outside the game, other windows over
+     * it – in pixels of [bild]; [gesehen] is only given if the same rectangles fit it).
      */
     fun merke(
         bild: Bitmap?,
@@ -179,6 +188,7 @@ object BerichtSender {
         gesehen: Bild? = null,
         erwartetesGebot: Int? = null,
         ergebnis: Ergebnis? = null,
+        schwarz: List<Rechteck> = emptyList(),
     ) {
         val flug = flugAn && flugOrdner != null
         val zeitMs = (System.currentTimeMillis() - laufStartMs).coerceAtLeast(0L)
@@ -186,16 +196,21 @@ object BerichtSender {
             if (flug) verkleinerer.execute { flugDazu(FlugschreiberRegeln.zeile(zeitMs, null, 0, schirm, ergebnis)) }
             return
         }
-        if (gesehen != null && schirm.unlesbar.isNotEmpty()) merkeLernbilder(gesehen, schirm, erwartetesGebot)
+        if (gesehen != null && schirm.unlesbar.isNotEmpty()) merkeLernbilder(gesehen, schirm, erwartetesGebot, schwarz)
         if (wartend.incrementAndGet() > MAX_WARTEND) {
             wartend.decrementAndGet()
             if (flug) verkleinerer.execute { flugDazu(FlugschreiberRegeln.zeile(zeitMs, null, 0, schirm, ergebnis)) }
             return
         }
         val klein = try {
-            Bitmap.createScaledBitmap(bild, (bild.width / 2).coerceAtLeast(1), (bild.height / 2).coerceAtLeast(1), true)
+            val halb = Bitmap.createScaledBitmap(bild, (bild.width / 2).coerceAtLeast(1), (bild.height / 2).coerceAtLeast(1), true)
+            // Review round 3 (Nov 23): black out in the small copy (cheaper); no copy possible → no screenshot.
+            val geschwaerzt = Schwaerzen.bitmap(halb, schwarz, halb.width.toFloat() / bild.width)
+            if (geschwaerzt !== halb && halb !== bild) halb.recycle()
+            geschwaerzt ?: throw IllegalStateException("no memory to black out")
         } catch (e: Exception) {
             wartend.decrementAndGet()
+            if (flug) verkleinerer.execute { flugDazu(FlugschreiberRegeln.zeile(zeitMs, null, 0, schirm, ergebnis)) }
             return
         }
         val zeit = LocalTime.now()
@@ -375,7 +390,8 @@ object BerichtSender {
                 version = AppInfo.version(ctx),
                 geraet = "${Build.MANUFACTURER} ${Build.MODEL}",
                 android = Build.VERSION.RELEASE ?: "?",
-                regeln = einst.regeln,
+                // Nov 23: no max buyout where the build does not offer buyout (like the bot got them).
+                regeln = BuyoutFreigabe.regelnFuerLauf(einst.regeln, Variante.BUYOUT_FREIGEGEBEN),
                 zielKopien = einst.zielKopien,
                 endeUm = einst.endeUm,
                 sgBudget = einst.sgBudget,
@@ -470,13 +486,33 @@ object BerichtSender {
      */
     fun alteLoeschen(ctx: Context, geteiltAlterMs: Long) {
         val app = ctx.applicationContext
+        // Review round 3 (Nov 23): plus the flight recorder's leftovers after a crash, and log lines older than 14 days.
+        resteLoeschen(app)
         sender.execute {
             runCatching { zuAlteLoeschen(basis(app)) }
             BildSpeicher.loeschen(app, System.currentTimeMillis() - AUFBEWAHREN_MS)
+            runCatching { BotZustand.protokollAufraeumen() }
             val grenze = System.currentTimeMillis() - geteiltAlterMs
             (File(app.cacheDir, GETEILT_ORDNER).listFiles() ?: emptyArray())
                 .filter { it.lastModified() < grenze }
                 .forEach { runCatching { it.deleteRecursively() } }
+        }
+    }
+
+    /**
+     * Review round 3 (Nov 23): the flight recorder's screenshots in the cache (cache/flugschreiber) are normally deleted
+     * at the end of a run. If the app crashed or was killed in the middle of a run, they stayed – they are deleted when
+     * the service starts again or the app is opened. Only as long as no run has started in this app process (then the
+     * folder belongs to that run).
+     */
+    fun resteLoeschen(ctx: Context) {
+        val ordner = File(ctx.applicationContext.cacheDir, FLUG_UNTERORDNER)
+        runCatching {
+            verkleinerer.execute {
+                synchronized(flugRing) {
+                    if (laufNr.get() == 0) runCatching { ordner.deleteRecursively() }
+                }
+            }
         }
     }
 

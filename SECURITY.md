@@ -26,8 +26,9 @@ Not requested: contacts, SMS, phone, location, camera, microphone, storage, inst
 Because the app has no `INTERNET` permission, **Android itself prevents it from sending anything over the network**.
 
 **About ML Kit (optional, off by default):** the setting **Google text recognition (second reader for numbers)** is
-**off** in this app; the bot reads the numbers itself. Only if you switch it on does the app create Google's *unbundled*
-ML Kit client. Its code and model come from **Google Play services**, which has its own network access, downloads the model
+**off** in this app; the bot reads the numbers itself. Only if you switch it on does the app start ML Kit (`MlKit.initialize`) and create Google's *unbundled*
+ML Kit client; ML Kit's start-up provider (`MlKitInitProvider`) is removed from the public app's manifest, and the CI
+build prints the merged manifest's components and fails if it comes back. Its code and model come from **Google Play services**, which has its own network access, downloads the model
 on first use and, according to Google's ML Kit terms, may send usage statistics to Google; the missing `INTERNET`
 permission of this app does not stop that. It only ever gets small crops of numbers from the game. Security scanners may
 report it as dynamic code loading; it is Google's library, not code of this project.
@@ -43,7 +44,8 @@ report it as dynamic code loading; it is Google's library, not code of this proj
    Android's window list (type, size, layer), the game's own window ids (learned from the game's events) and a flag of
    this app's own screen; it never reads the content of another app's window. Typing reads and fills only windows known
    to be the game's (`TextEingabe.kt`).
-   **Fail closed:** no tap, no typing and no screenshot unless a check at most 3 seconds old says the game is in front.
+   **Fail closed:** the window list is checked again right before every tap or swipe; no tap, no typing and no screenshot
+   unless the game is in front, and no tap on a spot covered by another app's window (`SpielVorne.punktFrei`).
 5. **No screenshots of other apps.** A screenshot is kept only while Idle Heroes is alone in front (no other app, no
    notification shade, no keyboard, never this app's own screen) - see `kern/.../SpielVorne.kt`. Nothing goes to your
    gallery.
@@ -60,11 +62,10 @@ report it as dynamic code loading; it is Google's library, not code of this proj
 |---|---|---|---|
 | Settings (rules, budget, end time) | app settings (included in Android backups) | until uninstall | uninstall |
 | Your OK (consent) and first-start flag (`zustimmung.xml`) | app settings (**excluded** from backups, so a new phone asks again) | until uninstall | uninstall |
-| The game's window ids (`fenster.xml`) | app settings (excluded from backups) | until the phone restarts | automatic |
 | Secondary password (optional) | encrypted, own file `geheim` (excluded from backups) | until you clear the field | clear the field, or uninstall |
-| Log (`protokoll.txt`) | app storage | max. ~4 MB (the oldest part is dropped) | **Delete reports, log and screenshots** |
+| Log (`protokoll.txt`, `protokoll.alt.txt`, start time in `protokoll.beginn`) | app storage | no line older than 14 days (restarts every 7 days or at 2 MB) | **Delete reports, log and screenshots** |
 | Reports (settings without password, log, a few game screenshots, phone model and Android version) | app storage (`noBackupFilesDir`) | saved **after every run**, last 5, max. 14 days | **Delete reports, log and screenshots** |
-| Flight recorder (optional, off by default: last ~3 min of game screenshots) | app cache | cleared after the end-of-run report | same button |
+| Flight recorder (optional, off by default: last ~3 min of game screenshots) | app cache | cleared after the end-of-run report, leftovers after a crash at the next start | same button |
 | Unsure screenshots of the game | app storage (`noBackupFilesDir/bilder`), max. 12 files / 40 MB | max. 14 days | same button |
 | Shared report ZIP | app cache (`cache/geteilt`) | deleted on the next app start | automatic |
 | Run flag (`lauf.xml`) | app settings (excluded from backups) | while a run is active | automatic |
@@ -73,7 +74,11 @@ The log goes to Android's system log (logcat) only in debug builds, never in rel
 declares `android:isAccessibilityTool="false"`: it is a game helper, not an accessibility tool for people with
 disabilities.
 
-Nothing of this leaves the phone unless **you** share a report through Android's share sheet.
+Every screenshot that is **saved** (reports, flight recorder, unsure screenshots) is blacked out outside the game window
+and under any other window on top of it (`SpielVorne.schwaerzen`). The game's window ids are kept only in memory.
+
+Nothing of this leaves the phone unless **you** share a report (or, with **Share log only**, just the log) through
+Android's share sheet.
 
 ## How to verify each claim
 

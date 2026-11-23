@@ -3,7 +3,9 @@ package io.github.hustlebot.ihauctionbot.app
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorSpace
+import android.graphics.Paint
 import android.content.pm.PackageManager
 import android.os.Build
 import io.github.hustlebot.ihauctionbot.kern.Bildschirm
@@ -19,6 +21,8 @@ import java.io.File
 import java.time.LocalDateTime
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlin.math.ceil
+import kotlin.math.floor
 
 /**
  * Reads the newest screenshot with the recognition from the core (auction house, rows, prices, windows).
@@ -178,20 +182,35 @@ object BildSpeicher {
 
     private fun ordner(ctx: Context): File = File(ctx.applicationContext.noBackupFilesDir, ORDNER)
 
-    fun speichereUnsicher(ctx: Context, bild: Bitmap, grund: String, sofort: Boolean = false, vorsilbe: String = "unsicher") {
+    /**
+     * Saves [bild] in the app. Review round 3 (Nov 23): [schwarz] = what is blacked out first (outside the game, other
+     * apps' overlays – see [Schwaerzen]); [bild] itself is not changed.
+     */
+    fun speichereUnsicher(
+        ctx: Context,
+        bild: Bitmap,
+        grund: String,
+        sofort: Boolean = false,
+        vorsilbe: String = "unsicher",
+        schwarz: List<Rechteck> = emptyList(),
+    ) {
         val jetzt = System.currentTimeMillis()
         if (!sofort && jetzt - zuletzt < ABSTAND_MS) return
         zuletzt = jetzt
         val app = ctx.applicationContext
         arbeiter.execute {
+            var aus: Bitmap? = null
             try {
+                aus = Schwaerzen.bitmap(bild, schwarz) ?: return@execute
                 val dir = ordner(app).apply { mkdirs() }
                 val name = BerichtNamen.gespeichertesBild(vorsilbe, LocalDateTime.now())
-                File(dir, name).outputStream().buffered().use { bild.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                File(dir, name).outputStream().buffered().use { aus.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 begrenzen(dir)
                 BotZustand.log("Screenshot saved in the app: $name ($grund) – it goes into the next report")
             } catch (e: Exception) {
                 BotZustand.log("Saving the screenshot failed: ${e.message}")
+            } finally {
+                if (aus != null && aus !== bild) aus.recycle()
             }
         }
     }
@@ -228,4 +247,43 @@ object BildSpeicher {
             }.get(10, TimeUnit.SECONDS)
         }
     }
+}
+
+/**
+ * Review round 3 (Nov 23): before a screenshot is SAVED (report, flight recorder, saved screenshots, learning images),
+ * everything outside the game and every other window over it (another app's chat head, bubble or caller-ID strip, the
+ * status bar) is painted black – the rectangles come from the window list
+ * ([io.github.hustlebot.ihauctionbot.kern.SpielVorne.schwaerzen]). Only the saved copy: what the bot reads is not changed.
+ */
+object Schwaerzen {
+
+    /**
+     * A copy of [bild] with [rechtecke] black ([faktor] = size of [bild] compared to the screenshot the rectangles belong
+     * to, e.g. 0.5 for the half size in reports). Nothing to black out → [bild] itself. null = no copy possible (memory)
+     * → do not save.
+     */
+    fun bitmap(bild: Bitmap, rechtecke: List<Rechteck>, faktor: Float = 1f): Bitmap? {
+        if (rechtecke.isEmpty()) return bild
+        val kopie = runCatching { bild.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull() ?: return null
+        val c = Canvas(kopie)
+        val farbe = Paint().apply {
+            color = Color.BLACK
+            style = Paint.Style.FILL
+        }
+        for (r in rechtecke) {
+            // Rounded outwards: never a pixel of the window left over at the edge.
+            c.drawRect(
+                floor(r.x0 * faktor),
+                floor(r.y0 * faktor),
+                ceil(r.x1 * faktor),
+                ceil(r.y1 * faktor),
+                farbe,
+            )
+        }
+        return kopie
+    }
+
+    /** Does the area [x0, y0, x1, y1) touch one of [rechtecke]? (A learning image there is not kept.) */
+    fun trifft(x0: Int, y0: Int, x1: Int, y1: Int, rechtecke: List<Rechteck>): Boolean =
+        rechtecke.any { it.x0 < x1 && x0 < it.x1 && it.y0 < y1 && y0 < it.y1 }
 }

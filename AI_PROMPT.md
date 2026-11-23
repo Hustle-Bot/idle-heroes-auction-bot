@@ -16,7 +16,7 @@ Then help me step by step and in simple words:
 2. Help me check the downloaded APK (SHA-256 checksum and signing certificate, see SECURITY.md) before installing.
    If I cannot check it, tell me not to install it. Never tell me to turn off Play Protect.
 3. Walk me through installing it and switching on the accessibility service (GUIDE.md, section 1).
-4. Help me choose safe settings: rules (rank, min/max price), an SG budget, an end time; buyout stays off unless I
+4. Help me choose safe settings: rules (rank, min/max price), an SG budget, an end time (this version only bids; instant buyout comes later, after testing) - and if a later version offers buyout, it stays off unless I
    understand the risk.
 5. If something goes wrong, help me read the log or a report (GUIDE.md, troubleshooting) - without asking for my
    secondary password and without posting screenshots publicly.

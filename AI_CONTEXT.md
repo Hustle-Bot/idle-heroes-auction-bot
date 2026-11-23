@@ -205,6 +205,12 @@ App (Nov 22): the main screen (status line, START/STOP, rules with **Max buyout 
 `Einstellungen.kt` (`stromsparen`, `buyout` -> `AuktionsBot(buyoutAn = ...)`, `Suchregel.buyoutMax`, JSON keys `buyout` and `buyoutMax`). The overnight
 warnings before a start and the battery/temperature limits are `NachtCheck.kt` (`warnungen`, `AKKU_MIN_PROZENT`,
 `KUEHL_C`); the pause/stop itself happens in `BotDienst.kt` (`StoppGrund.AKKU_SCHWACH`).
+Buyout (Nov 23): prepared but not offered in the public app until tested in the real game (`Variante.BUYOUT_FREIGEGEBEN`
+= false in oss; `kern/.../BuyoutFreigabe.kt` forces `buyoutAn = false` and strips `buyoutMax` from the run's rules).
+Privacy (Nov 23, round 3): saved screenshots are blacked out outside the game and under other windows
+(`SpielVorne.schwaerzen`), taps under another window are skipped (`SpielVorne.punktFrei`), the window list is read right
+before every gesture (`BotDienst.vorneJetzt`), window ids only in memory, log lines expire after 14 days
+(`BotZustand.protokollAufraeumen`), flight-recorder leftovers are removed (`BerichtSender.resteLoeschen`).
 Privacy (Nov 22/23): `kern/.../SpielVorne.kt` (`FensterZuordnung`) decides from the window list, the game's own window
 ids and the app's own-screen flag which app is in front - never by reading another app's window - and whether a frame may
 be kept (game alone in front; tested); gestures, typing and screenshots fail closed (state older than 3 s = no action);

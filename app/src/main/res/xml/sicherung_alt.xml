@@ -3,7 +3,8 @@
      file lauf.xml ("a run is active") never either: restored on another phone it would lock the screen there.
      Review round 2 (Nov 23): the player's consent (zustimmung.xml) never either - it has to be given on every phone
      (older versions kept it in einstellungen.xml; it is moved once, see Zustimmung). Nor the game's window ids
-     (fenster.xml): they only count until the phone restarts. -->
+     (fenster.xml): they only count until the phone restarts.
+     Review round 3 (Nov 23): they are no longer saved at all; the service deletes fenster.xml of older versions. -->
 <full-backup-content>
     <include domain="sharedpref" path="." />
     <exclude domain="sharedpref" path="geheim.xml" />

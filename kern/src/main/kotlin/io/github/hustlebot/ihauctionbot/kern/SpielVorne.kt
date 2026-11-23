@@ -1,5 +1,7 @@
 package io.github.hustlebot.ihauctionbot.kern
 
+import io.github.hustlebot.ihauctionbot.kern.bild.Rechteck
+
 /**
  * Review before publishing (Nov 22): which app is in front, and may a screenshot taken right now be kept?
  *
@@ -15,6 +17,11 @@ package io.github.hustlebot.ihauctionbot.kern
  * Privacy review, round 2 (Nov 23): the app no longer asks any window which app it belongs to. Which app windows are
  * the game's (or this app's) is decided by [FensterZuordnung] from the window list and the game's own events; every
  * other app window counts as another app ([FREMDE_APP]).
+ *
+ * Review round 3 (Nov 23): small overlays of other apps (chat heads, bubbles, caller-ID strips) count as system windows
+ * and may lie over the game. A screenshot that is kept is blacked out outside the game and under every other window
+ * ([schwaerzen]); a gesture whose point lies under another window is not sent ([punktFrei]). The window list is looked
+ * at right before every gesture as well.
  */
 object SpielVorne {
 
@@ -48,6 +55,8 @@ object SpielVorne {
     /**
      * A window as Android reports it. [paket] only for app windows (null = unknown), [schicht] = z-order (higher = on
      * top), [breite]/[hoehe] = size on the screen in pixels (0 = unknown), [id] = Android's window id (-1 = unknown).
+     * Review round 3 (Nov 23): [links]/[oben] = position of its top left corner on the screen in pixels (with
+     * [breite]/[hoehe] the window's bounds, as AccessibilityWindowInfo.getBoundsInScreen gives them).
      */
     data class Fenster(
         val art: Art,
@@ -58,7 +67,17 @@ object SpielVorne {
         val breite: Int = 0,
         val hoehe: Int = 0,
         val id: Int = -1,
-    )
+        val links: Int = 0,
+        val oben: Int = 0,
+    ) {
+        /** The window's bounds on the screen (null = size not known). */
+        val flaeche: Rechteck?
+            get() = if (breite > 0 && hoehe > 0) Rechteck(links, oben, links + breite, oben + hoehe) else null
+
+        /** Does the point ([x], [y]) lie inside the window's bounds? Unknown size = no. */
+        fun enthaelt(x: Int, y: Int): Boolean =
+            breite > 0 && hoehe > 0 && x >= links && x < links + breite && y >= oben && y < oben + hoehe
+    }
 
     /** What is in front. */
     enum class Lage {
@@ -128,6 +147,77 @@ object SpielVorne {
     fun deckt(w: Fenster, minDeckendPx: Int): Boolean =
         w.breite > 0 && w.hoehe > 0 && minOf(w.breite, w.hoehe) > minDeckendPx
 
+    /** The app windows of the game in front (the app of [vorneApp], if it is an allowed game) – empty otherwise. */
+    private fun spielFenster(fenster: List<Fenster>, spiele: Set<String>): List<Fenster> {
+        val spiel = vorneApp(fenster)?.paket?.trim()
+        if (spiel.isNullOrEmpty() || spiel !in spiele) return emptyList()
+        return fenster.filter { it.art == Art.APP && it.paket?.trim() == spiel }
+    }
+
+    /**
+     * Review round 3 (Nov 23): what has to be blacked out in a screenshot before it is SAVED (report, flight recorder,
+     * saved screenshots). [bildBreite] x [bildHoehe] = the screenshot, in the same pixels as the window list.
+     *
+     * [bildFrei] already refuses a screenshot with another app, the keyboard or a big system window. Small system
+     * windows pass it, though: other apps' overlays like chat heads, bubbles or a caller-ID strip, and the status and
+     * navigation bars (their icons can show which apps sent notifications). So:
+     *  - everything outside the game's windows (their common bounds) is black,
+     *  - every other window that overlaps the game is black where it overlaps (system windows, unknown app windows,
+     *    the keyboard, anything else).
+     * Accessibility overlays (this app's IH button and shield, hidden or transparent for the bot's screenshots) are left
+     * as they are – the app cannot tell them from another accessibility service's overlay without reading them.
+     *
+     * Result: the rectangles to black out (empty = nothing), or null = it cannot be said – the game is not in front,
+     * its windows have no size, or they do not fit into the screenshot (e.g. the screenshot came in another
+     * orientation than the window list). Then the screenshot is not saved at all (fail closed).
+     */
+    fun schwaerzen(fenster: List<Fenster>, spiele: Set<String>, bildBreite: Int, bildHoehe: Int): List<Rechteck>? {
+        if (bildBreite <= 0 || bildHoehe <= 0) return null
+        val spielFenster = spielFenster(fenster, spiele)
+        val flaechen = spielFenster.mapNotNull { it.flaeche }
+        if (flaechen.isEmpty()) return null
+        val links = flaechen.minOf { it.x0 }
+        val oben = flaechen.minOf { it.y0 }
+        val rechts = flaechen.maxOf { it.x1 }
+        val unten = flaechen.maxOf { it.y1 }
+        // The game's windows must lie inside the screenshot – otherwise the two do not belong together.
+        if (links < 0 || oben < 0 || rechts > bildBreite || unten > bildHoehe) return null
+        val spiel = Rechteck(links, oben, rechts, unten)
+        val schwarz = ArrayList<Rechteck>()
+        // Outside the game: up to four strips around it.
+        if (spiel.y0 > 0) schwarz += Rechteck(0, 0, bildBreite, spiel.y0)
+        if (spiel.y1 < bildHoehe) schwarz += Rechteck(0, spiel.y1, bildBreite, bildHoehe)
+        if (spiel.x0 > 0) schwarz += Rechteck(0, spiel.y0, spiel.x0, spiel.y1)
+        if (spiel.x1 < bildBreite) schwarz += Rechteck(spiel.x1, spiel.y0, bildBreite, spiel.y1)
+        // Every other window over the game.
+        for (w in fenster) {
+            if (w.art == Art.UEBERLAGERUNG || spielFenster.any { it === w }) continue
+            val f = w.flaeche ?: continue
+            val x0 = maxOf(f.x0, spiel.x0)
+            val y0 = maxOf(f.y0, spiel.y0)
+            val x1 = minOf(f.x1, spiel.x1)
+            val y1 = minOf(f.y1, spiel.y1)
+            if (x0 < x1 && y0 < y1) schwarz += Rechteck(x0, y0, x1, y1)
+        }
+        return schwarz
+    }
+
+    /**
+     * Review round 3 (Nov 23): may a gesture start at ([x], [y]) (screen pixels)? Android gives the touch to the topmost
+     * window at that point – it must be a window of the game in front. Not if any other window lies on top of the game
+     * there: a small system window (another app's chat head, bubble or caller-ID strip, a heads-up notification, a status
+     * or navigation bar), an app window that is not the game's (or not known yet), the keyboard, anything else.
+     * Accessibility overlays (this app's IH button and shield) do not count – the app lets the gesture through them
+     * itself. No window of the game at that point (or the game not in front) → no (fail closed).
+     */
+    fun punktFrei(fenster: List<Fenster>, spiele: Set<String>, x: Int, y: Int): Boolean {
+        val spielFenster = spielFenster(fenster, spiele)
+        val spielOben = spielFenster.filter { it.enthaelt(x, y) }.maxOfOrNull { it.schicht } ?: return false
+        return fenster.none { w ->
+            w.art != Art.UEBERLAGERUNG && spielFenster.none { it === w } && w.enthaelt(x, y) && w.schicht >= spielOben
+        }
+    }
+
     /**
      * Stop when leaving the game: another app is in front since [fremdSeitMs], the game was last seen in front at
      * [spielZuletztMs]. The bot stops [frist] after the game was last seen – but never earlier than [mindestens] after the
@@ -150,7 +240,11 @@ object SpielVorne {
  *  - Every other app window is another app ([SpielVorne.FREMDE_APP]); nothing about it is read. Only a window that
  *    appeared just now ([NEU_MS]) stays "not known" (null) for a moment – the game's event for it may still be on its way.
  *
- * Only the window list's own data is used (kind, id, layer, size, active/focused). Thread-safe.
+ * Review round 3 (Nov 23): what was learned lives only in memory. The window ids are no longer saved (fenster.xml) to be
+ * taken back after a crash: whether the phone had restarted in between could only be guessed. After a restart of the
+ * app the game counts as another app until it sends an event again (fail closed).
+ *
+ * Only the window list's own data is used (kind, id, layer, size, position, active/focused). Thread-safe.
  */
 class FensterZuordnung(private val maxFenster: Int = 64) {
 
@@ -193,15 +287,9 @@ class FensterZuordnung(private val maxFenster: Int = 64) {
     @Synchronized
     fun spielBekannt(): Boolean = spiel.isNotEmpty()
 
-    /** The game's windows (id → app, oldest first) – to remember them across a restart of the service. */
+    /** The game's windows known right now (id → app, oldest first). Only in memory, never saved (review round 3). */
     @Synchronized
     fun spielFenster(): Map<Int, String> = LinkedHashMap(spiel)
-
-    /** Take over windows remembered earlier (only while the phone has not been restarted since); only apps in [spiele]. */
-    @Synchronized
-    fun uebernehmen(gemerkt: Map<Int, String>, spiele: Set<String>) {
-        gemerkt.forEach { (id, p) -> lernen(id, p, spiele) }
-    }
 
     /**
      * The windows with [SpielVorne.Fenster.paket] filled in for app windows: the game's app, [eigenesPaket], null (not

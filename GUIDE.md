@@ -5,7 +5,7 @@
 
 Contents: [Install](#1-install) - [Prepare the game](#2-prepare-the-game) - [Settings](#3-settings-explained) -
 [Start and stop](#4-start-and-stop) - [Touch modes](#5-touching-the-phone-while-it-runs) -
-[Overnight](#6-running-overnight) - [Buyout](#7-buyout-optional-off-by-default) - [Reports](#8-reports) -
+[Overnight](#6-running-overnight) - [Buyout](#7-buyout-coming-after-testing) - [Reports](#8-reports) -
 [Troubleshooting](#9-troubleshooting) - [FAQ](#10-faq)
 
 ---
@@ -83,12 +83,9 @@ A **rule** says: "bid on this tier of copy, but only in this price range". Each 
   Example: rule *B-, 10-60* means a row at 60 SG gets a bid of 61 SG, never more.
 - **Only bid if the auction ends within ... minutes:** leave empty for "any time left". A short limit (default 5 minutes)
   keeps your 50 bid slots free for auctions that are about to end.
-- **Max buyout (SG):** leave empty for "never buy out". Only used when **Buyout (beta)** is on, see
-  [section 7](#7-buyout-optional-off-by-default).
 - Buttons: **▲ / ▼** change the order (the bot works through the rules in this order), **Off / On**, **Edit**, **Delete**,
   **+ Add rule**.
-- Below the rules: the checkbox **Buyout (beta)**, **off by default**.
-- Defaults after a fresh install: **B-, 10-60** and **C-, 10-20**, both "only last 5 min", no buyout.
+- Defaults after a fresh install: **B-, 10-60** and **C-, 10-20**, both "only last 5 min".
 
 ### When to stop
 
@@ -117,10 +114,11 @@ See [section 5](#5-touching-the-phone-while-it-runs).
 
 **Secondary password** - the game's auction house secondary password protects your Starry Gems. The safest way is to
 **leave this empty and type the password in the game yourself** when the game asks (the bot waits and shows a note). If
-you want the bot to type it for you, you can save it here: it is stored **encrypted** (Android Keystore), never written to
-the log, never included in reports and not included in Android backups, and no screenshot is kept while the game's
-password window is open. Saving it means anyone who can start the bot on your unlocked phone can bid with it. Tick
-**Show** only to check what you typed (screenshots of the settings are blocked while it is shown).
+you want the bot to type it for you, type it here and tap **Save**: it is stored **encrypted** (Android Keystore), never
+written to the log, never included in reports and not included in Android backups, and no screenshot is kept while the
+game's password window is open. Once saved, the app only shows **Saved ✓** with **Replace** and **Delete** - it never
+shows the saved password again. **Show what I type** only reveals what you are typing right now (screenshots of the
+settings are blocked meanwhile). Saving it means anyone who can start the bot on your unlocked phone can bid with it.
 
 **Reading numbers** - **Google text recognition (second reader for numbers)**, **off** by default. The bot reads prices
 and timers itself; this only adds Google's ML Kit as a second opinion for numbers it cannot read. If you switch it on,
@@ -164,7 +162,8 @@ happened.
 in the game's *Bidding Market* tap the round **IH** button, then **▶ Start**.
 
 Before a start from the app, a window **Before you start** may list warnings: the phone is not charging, battery
-optimization is on for the app (button **Battery settings**), or a tip to turn on Do Not Disturb. These are only hints:
+optimization is on for the app (button **Battery settings**), no SG budget is set, the screen is not about 20:9 (the
+bot is calibrated for 2712 x 1220 and may misread other shapes), or a tip to turn on Do Not Disturb. These are only hints:
 **Start anyway** starts the bot, **Cancel** goes back.
 
 **Stop:** the big red **STOP** in the app stops the bot at once, just like **■ Stop** on the IH button.
@@ -231,28 +230,16 @@ of guessing when it does not know what it sees.
 tapping nothing, until the auction house is back, and sets the filter and sorting again. If the game ends up somewhere else
 (for example the main screen), the bot stops. It reconnects at most **5 times per run**; the 6th lost connection stops it.
 
-## 7. Buyout (optional, off by default)
+## 7. Buyout (coming after testing)
 
-Besides bidding, the game also lets you buy a copy instantly for its **buyout price**. The bot can do this too, but:
+The game also lets you buy a copy instantly for its **buyout price**. The bot's code for this exists, but it has **not
+been tested in the real game yet**, so **this version does not offer it**: there is no buyout switch and no "max buyout"
+field, and the bot **only ever taps "Bid"**, never "Buyout" - even if older saved settings say otherwise.
 
-- It is **off by default** (a global switch in the settings).
-- Each rule has its **own maximum buyout price**; the bot never pays more than that.
-- A buyout **counts toward your SG budget** and toward your **goal** (copies bought).
-- With buyout on, the bot sets the game's filter **max price** up to your maximum buyout price (if that is higher), so all
-  copies you could buy out are listed. It still **bids** only on copies up to the rule's normal max price.
-- The bot only taps **Buyout Price** if the Bid window shows the same buyout price as the list and it is at most your maximum.
-  Otherwise it closes the window with the red X.
-- If the game shows a confirmation window after **Buyout Price** that the bot does not know yet, it taps nothing and stops
-  (`Buyout: unknown confirmation window - save a report so this window can be learned`). Please save a report then.
-- A buyout is **final**: you cannot be outbid, but you also cannot take it back. A misread price would be costly.
-  Only turn it on if you understand this, and start with a low maximum and a small budget.
-
-With the switch off (the default) the bot **only ever taps "Bid"**, never "Buyout".
-
-**Where to set it:** the checkbox **Buyout (beta)** is on the main screen below the rules. The maximum is the field
-**Max buyout (SG)** in each rule's dialog (**Edit** or **+ Add rule**). The rule row then reads
-*B-: up to 61 SG · buyout up to 45 SG*; while the checkbox is off it adds *buyout is switched off*. During a run the status
-counts buyouts and reconnects, e.g. *Running - bidding on B- (12 bids, 3 copies won · 1 bought out · 2 reconnects)*.
+When it is released after testing, it will work like this: off by default; a maximum buyout price per rule; it counts
+toward your SG budget and goal; it buys only if the Bid window shows the same buyout price as the list and it is at most
+your maximum; and it stops (tapping nothing) at any confirmation window it does not know. A buyout is final, so it will
+be worth starting with a low maximum and a small budget.
 
 ## 8. Reports
 
@@ -263,7 +250,9 @@ When something goes wrong, a **report** helps to find out why. Reports are **onl
   (Settings -> Reports) deletes them at once.
 - **Save report:** Settings -> Reports -> **Save report** (or the **📝 Save report** button in the IH panel).
 - **Share latest report:** Settings -> Reports -> **Share latest report** opens Android's share sheet with one ZIP file.
-  You choose the app (mail, chat, GitHub issue attachment ...). Nothing is sent unless you do it.
+  You choose the app. Nothing is sent unless you do it. **Share it privately** (e-mail or a direct message to someone you
+  trust), not in a public GitHub issue: the screenshots may show player names.
+- **Share log only:** shares just the log as a text file, without any screenshots - the safer choice for public help.
 - A report contains the app version, your settings **without** the password, the log, and a few screenshots with what the
   bot recognised in them. It never includes a screenshot of the password window.
 - Screenshots show the game only: the bot keeps a screenshot only when Idle Heroes is alone in front (no other app, no
@@ -292,6 +281,7 @@ When something goes wrong, a **report** helps to find out why. Reports are **onl
 | `Nothing to bid right now - next reload of the list at 23:14:05` | Normal. With nothing to bid (and nothing fitting ending within a minute) the bot refreshes only every 5-15 s. |
 | `A bid shows a price above the rule's maximum - bot stopped, please save a report` | Safety stop: after a bid, your own row (clock) showed a price above max price + 1 twice. Check *My Biddings* and save a report. |
 | `Idle Heroes is not in front or not recognised yet` | The bot only acts in Idle Heroes and learns the game's window from the game itself. If you switched the service on while the game was already open, switch to another app and back once (or press START in this app, which opens the game). |
+| `Tap skipped – another window is on top` | A small window of another app (chat head, bubble, caller ID) was over the spot the bot wanted to tap, so it did not tap. Close or move that window. |
 | `Not clear which app is in front` / `Gesture skipped` | For a moment the bot could not confirm that Idle Heroes is in front, so it tapped nothing. If it keeps appearing, close pop-ups or notifications over the game. |
 | `Unknown screen - please go to the auction house` / `I don't recognise the auction house` | The bot does not know what is on screen (it tapped nothing). Go to the Bidding Market and press Start again. A screenshot is kept in the app for the next report. |
 | `Did not recognize the auction house for too long` | Same, but it kept happening, so the bot stopped. |

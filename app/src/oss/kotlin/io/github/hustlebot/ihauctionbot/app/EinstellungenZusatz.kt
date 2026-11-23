@@ -37,21 +37,27 @@ class EinstellungenZusatz(private val b: Baukasten) {
         })
     }
 
-    /** Explanation of the "Reports" card. */
+    /**
+     * Explanation of the "Reports" card. Review round 3 (Nov 23): share privately – a report has screenshots of the game
+     * that may show names, so a public GitHub issue is the wrong place; "Share log only" sends no screenshots.
+     */
     val berichtErklaerung: String =
         "A report contains the log, the latest screenshots and the settings – never your secondary password, never " +
             "screenshots of the password window. Reports stay inside this app on your phone (the last 5, at most 14 days); nothing is " +
             "sent anywhere. One is saved at the end of every run, when the bot is stuck and when you tap \"Save report\". " +
-            "To get help, share the latest report yourself, e.g. in a GitHub issue. The screenshots show your game " +
-            "account – only share it with people you trust."
+            "To get help, share it privately (e.g. by e-mail or a direct message) with someone you trust – not in a " +
+            "public place like a GitHub issue: the screenshots show your game account and may show player names. " +
+            "\"Share log only\" shares just the log as a text file, without any screenshots."
 
-    /** "Save report" and "Share latest report" (at the top of the "Reports" card). */
+    /** "Save report", "Share latest report" and "Share log only" (at the top of the "Reports" card). */
     fun berichtTeil(karte: LinearLayout) {
         karte.addView(b.knopf("Save report") {
             BerichtSender.sende(act, "by hand (settings)", automatisch = false)
             Toast.makeText(act, "The report is being saved …", Toast.LENGTH_SHORT).show()
         })
-        karte.addView(b.knopf("Share latest report") { BerichtTeilen.teilen(act) })
+        karte.addView(b.knopf("Share latest report (privately)") { BerichtTeilen.teilen(act) })
+        // Review round 3 (Nov 23): the log as a text file, without screenshots (same safe sharing path).
+        karte.addView(b.knopf("Share log only") { BerichtTeilen.protokollTeilen(act) })
     }
 
     /** No extra card. */

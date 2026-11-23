@@ -3,8 +3,10 @@ package io.github.hustlebot.ihauctionbot.kern
 import io.github.hustlebot.ihauctionbot.kern.SpielVorne.Art
 import io.github.hustlebot.ihauctionbot.kern.SpielVorne.Fenster
 import io.github.hustlebot.ihauctionbot.kern.SpielVorne.Lage
+import io.github.hustlebot.ihauctionbot.kern.bild.Rechteck
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -206,11 +208,12 @@ class SpielVorneTest {
         val liste = z.einordnen(roh(spielRoh), false, eigen, lang)
         assertEquals(Lage.FREMD, SpielVorne.lage(liste, spiele, eigen))
         assertFalse(SpielVorne.bildFrei(liste, spiele, dunn))
-        // Remembered from before (same phone start, e.g. after a crash of the app): the game right away.
-        val z2 = FensterZuordnung()
-        z2.uebernehmen(mapOf(7 to spiel, 8 to andere), spiele)
-        assertEquals(mapOf(7 to spiel), z2.spielFenster(), "only apps on the allow-list are taken over")
-        assertEquals(Lage.SPIEL, SpielVorne.lage(z2.einordnen(roh(spielRoh), false, eigen, 0), spiele, eigen))
+        assertFalse(SpielVorne.punktFrei(liste, spiele, 1356, 610), "no gesture either")
+        // Review round 3 (Nov 23): nothing is taken over from before a restart of the app – only the game's next event
+        // makes its window known again.
+        assertTrue(z.spielFenster().isEmpty())
+        assertTrue(z.lernen(7, spiel, spiele))
+        assertEquals(Lage.SPIEL, SpielVorne.lage(z.einordnen(roh(spielRoh), false, eigen, 2 * lang), spiele, eigen))
     }
 
     @Test
@@ -228,5 +231,104 @@ class SpielVorneTest {
         for (id in 1..5) z.lernen(id, spiel, spiele)
         assertEquals(listOf(3, 4, 5), z.spielFenster().keys.toList())
         assertFalse(z.istSpiel(1))
+    }
+
+    // ---------------- Review round 3 (Nov 23): overlays of other apps over the game ----------------
+
+    private val breite = 2712
+    private val hoehe = 1220
+
+    /** Another app's chat head (an overlay – Android reports it as a system window), small enough to pass [SpielVorne.bildFrei]. */
+    private val chatKopf = Fenster(Art.SYSTEM, schicht = 13, breite = 165, hoehe = 165, links = 2400, oben = 500)
+
+    /** A caller-ID strip of another app across the top of the screen. */
+    private val anruferStreifen = Fenster(Art.SYSTEM, schicht = 14, breite = 1600, hoehe = 140, links = 556, oben = 200)
+
+    @Test
+    fun `game alone on the whole screen - nothing to black out`() {
+        val liste = listOf(ihKnopf, schild, spielFenster)
+        assertEquals(emptyList<Rechteck>(), SpielVorne.schwaerzen(liste, spiele, breite, hoehe))
+    }
+
+    @Test
+    fun `a chat head or caller-ID strip over the game - kept screenshot is black there, the rest stays`() {
+        val liste = listOf(chatKopf, anruferStreifen, ihKnopf.copy(links = 2500, oben = 40), spielFenster)
+        assertTrue(SpielVorne.bildFrei(liste, spiele, dunn), "small overlays pass the old check – that was the gap")
+        assertEquals(
+            listOf(Rechteck(2400, 500, 2565, 665), Rechteck(556, 200, 2156, 340)),
+            SpielVorne.schwaerzen(liste, spiele, breite, hoehe),
+            "only the two overlays – never the IH button",
+        )
+    }
+
+    @Test
+    fun `status bar over the game and a window partly outside - only the part over the game, plus everything outside`() {
+        // The game leaves room for a navigation bar on the right (3 buttons, landscape).
+        val spielSchmal = spielFenster.copy(breite = 2580)
+        val navi = navileiste.copy(links = 2580)
+        val oben = statusleiste
+        val halb = Fenster(Art.SYSTEM, schicht = 12, breite = 200, hoehe = 100, links = 2500, oben = 700)
+        val liste = listOf(oben, navi, halb, spielSchmal)
+        val schwarz = SpielVorne.schwaerzen(liste, spiele, breite, hoehe)!!
+        assertTrue(Rechteck(2580, 0, 2712, 1220) in schwarz, "outside the game (the navigation bar's place)")
+        assertTrue(Rechteck(0, 0, 2580, 66) in schwarz, "the status bar where it lies over the game")
+        assertTrue(Rechteck(2500, 700, 2580, 800) in schwarz, "only the part over the game")
+        assertEquals(3, schwarz.size)
+    }
+
+    @Test
+    fun `screenshot and window list do not fit together, or the game is not in front - do not save at all`() {
+        val liste = listOf(chatKopf, spielFenster)
+        assertNull(SpielVorne.schwaerzen(liste, spiele, hoehe, breite), "screenshot in the other orientation")
+        assertNull(SpielVorne.schwaerzen(listOf(spielFenster.copy(breite = 0, hoehe = 0)), spiele, breite, hoehe), "no size")
+        val fremd = Fenster(Art.APP, andere, aktiv = true, breite = breite, hoehe = hoehe)
+        assertNull(SpielVorne.schwaerzen(listOf(fremd), spiele, breite, hoehe), "another app in front")
+        assertNull(SpielVorne.schwaerzen(liste, spiele, 0, 0))
+    }
+
+    @Test
+    fun `a gesture under another window is not sent, next to it it is`() {
+        val liste = listOf(chatKopf, anruferStreifen, spielFenster, statusleiste)
+        assertFalse(SpielVorne.punktFrei(liste, spiele, 2450, 550), "under the chat head")
+        assertFalse(SpielVorne.punktFrei(liste, spiele, 1000, 250), "under the caller-ID strip")
+        assertFalse(SpielVorne.punktFrei(liste, spiele, 1000, 30), "under the status bar")
+        assertTrue(SpielVorne.punktFrei(liste, spiele, 2000, 550), "next to the chat head")
+        assertTrue(SpielVorne.punktFrei(liste, spiele, 1000, 400), "below the strip")
+        // The edges: the window's bounds are [links, links + breite).
+        assertFalse(SpielVorne.punktFrei(liste, spiele, 2400, 500))
+        assertTrue(SpielVorne.punktFrei(liste, spiele, 2565, 665))
+    }
+
+    @Test
+    fun `this app's IH button and shield do not stop a gesture, the keyboard and unknown windows do`() {
+        val knopf = ihKnopf.copy(links = 1300, oben = 500)
+        val schildVoll = schild.copy(breite = breite, hoehe = hoehe)
+        assertTrue(SpielVorne.punktFrei(listOf(knopf, schildVoll, spielFenster), spiele, 1350, 550))
+        val tastatur = Fenster(Art.TASTATUR, schicht = 15, breite = breite, hoehe = 600, oben = 620)
+        assertFalse(SpielVorne.punktFrei(listOf(tastatur, spielFenster), spiele, 1356, 1000))
+        assertTrue(SpielVorne.punktFrei(listOf(tastatur, spielFenster), spiele, 1356, 300))
+        val unbekannt = Fenster(Art.APP, null, schicht = 6, breite = 800, hoehe = 400, links = 900, oben = 400)
+        assertFalse(SpielVorne.punktFrei(listOf(unbekannt, spielFenster), spiele, 1300, 600), "not known yet - fail closed")
+        val anderes = Fenster(Art.ANDERES, schicht = 6, breite = 40, hoehe = hoehe, links = 1336)
+        assertFalse(SpielVorne.punktFrei(listOf(anderes, spielFenster), spiele, 1350, 600), "e.g. a split-screen divider")
+    }
+
+    @Test
+    fun `a second window of the game on top is fine, a window below the game does not count`() {
+        val dialog = Fenster(Art.APP, spiel, schicht = 5, breite = 1200, hoehe = 600, links = 756, oben = 300)
+        assertTrue(SpielVorne.punktFrei(listOf(dialog, spielFenster), spiele, 1356, 610))
+        val darunter = Fenster(Art.SYSTEM, schicht = 1, breite = 400, hoehe = 400, links = 1200, oben = 400)
+        assertTrue(SpielVorne.punktFrei(listOf(spielFenster, darunter), spiele, 1356, 610), "covered by the game")
+        val gleich = darunter.copy(schicht = spielFenster.schicht)
+        assertFalse(SpielVorne.punktFrei(listOf(spielFenster, gleich), spiele, 1356, 610), "same layer - fail closed")
+    }
+
+    @Test
+    fun `no game window at the point, or the game not in front - no gesture`() {
+        val spielSchmal = spielFenster.copy(breite = 2580)
+        assertFalse(SpielVorne.punktFrei(listOf(spielSchmal), spiele, 2650, 600), "outside the game's window")
+        val fremd = Fenster(Art.APP, andere, aktiv = true, schicht = 3, breite = breite, hoehe = hoehe)
+        assertFalse(SpielVorne.punktFrei(listOf(fremd, spielFenster.copy(aktiv = false, fokus = false)), spiele, 1356, 610))
+        assertFalse(SpielVorne.punktFrei(emptyList(), spiele, 1356, 610))
     }
 }

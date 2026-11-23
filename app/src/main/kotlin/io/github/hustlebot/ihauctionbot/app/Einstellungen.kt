@@ -1,8 +1,7 @@
 package io.github.hustlebot.ihauctionbot.app
 
 import android.content.Context
-import android.os.SystemClock
-import android.provider.Settings
+import io.github.hustlebot.ihauctionbot.kern.BuyoutFreigabe
 import io.github.hustlebot.ihauctionbot.kern.Suchregel
 import io.github.hustlebot.ihauctionbot.kern.WISCH_VERHAELTNIS_MAX
 import io.github.hustlebot.ihauctionbot.kern.WISCH_VERHAELTNIS_MIN
@@ -106,7 +105,8 @@ private val ALTE_STANDARDS: List<List<Suchregel>> = listOf(
 fun regelText(r: Suchregel): String =
     "${r.kopie} · filter ${r.minPreis}–${r.maxPreis} · bid at most ${r.hoechstesGebot} SG · " +
         (r.maxRestzeitMin?.let { "only last $it min" } ?: "any time left") +
-        (r.buyoutMax?.let { " · buyout up to $it SG" } ?: "")
+        // Nov 23: the max buyout only where the build offers buyout.
+        BuyoutFreigabe.regelText(r.buyoutMax, Variante.BUYOUT_FREIGEGEBEN)
 
 /** Saves the settings on the phone. */
 object EinstellungenSpeicher {
@@ -243,54 +243,6 @@ object Zustimmung {
 
     fun ersterStartMerken(ctx: Context) {
         ctx.getSharedPreferences(DATEI, Context.MODE_PRIVATE).edit().putBoolean(ERSTER_START, true).apply()
-    }
-}
-
-/**
- * Privacy review, round 2 (Nov 23): the game's windows (window id → app), learned from the game's own events (see
- * [io.github.hustlebot.ihauctionbot.kern.FensterZuordnung]) – remembered so that after a crash or an update of the app the
- * service knows the game's window again right away (e.g. to lock the screen after a crash in the middle of a run).
- * Window ids only count until the phone restarts, so they are only taken back while the phone has not restarted since.
- * Own file, not in the backup (res/xml/sicherung*.xml).
- */
-object FensterSpeicher {
-    private const val DATEI = "fenster"
-    private const val FENSTER = "spielFenster"
-    private const val START_UM = "telefonStartUm"
-    private const val STARTS = "telefonStarts"
-
-    /** A phone start counts as the same one if its computed time differs by at most this (clock corrections). */
-    private const val START_TOLERANZ_MS = 30_000L
-
-    /** When the phone started (System.currentTimeMillis) – the same for every call until the next restart. */
-    private fun telefonStartUm(): Long = System.currentTimeMillis() - SystemClock.elapsedRealtime()
-
-    /** How often the phone has started (Android counts it; -1 = not known). */
-    private fun telefonStarts(ctx: Context): Int =
-        runCatching { Settings.Global.getInt(ctx.contentResolver, Settings.Global.BOOT_COUNT, -1) }.getOrDefault(-1)
-
-    fun merken(ctx: Context, fenster: Map<Int, String>) {
-        val text = fenster.entries.joinToString(",") { (id, p) -> "$id:$p" }
-        ctx.getSharedPreferences(DATEI, Context.MODE_PRIVATE).edit()
-            .putString(FENSTER, text)
-            .putLong(START_UM, telefonStartUm())
-            .putInt(STARTS, telefonStarts(ctx))
-            .apply()
-    }
-
-    /** The remembered windows – empty if the phone has restarted since (or nothing is remembered). */
-    fun laden(ctx: Context): Map<Int, String> {
-        val p = ctx.getSharedPreferences(DATEI, Context.MODE_PRIVATE)
-        val text = p.getString(FENSTER, null)?.takeIf { it.isNotBlank() } ?: return emptyMap()
-        val starts = p.getInt(STARTS, -1)
-        val jetztStarts = telefonStarts(ctx)
-        if (starts >= 0 && jetztStarts >= 0 && starts != jetztStarts) return emptyMap()
-        if (kotlin.math.abs(p.getLong(START_UM, 0L) - telefonStartUm()) > START_TOLERANZ_MS) return emptyMap()
-        return text.split(",").mapNotNull { teil ->
-            val id = teil.substringBefore(":").trim().toIntOrNull() ?: return@mapNotNull null
-            val paket = teil.substringAfter(":", "").trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
-            id to paket
-        }.toMap()
     }
 }
 

@@ -1,7 +1,9 @@
 package io.github.hustlebot.ihauctionbot.app
 
+import android.content.Context
 import android.graphics.Bitmap
 import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.common.MlKit
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
@@ -23,8 +25,12 @@ import java.util.concurrent.TimeoutException
  * Review round 2 (Nov 23): only used while the setting "Google text recognition" is on ([Einstellungen.mlKit]) – BotDienst
  * creates this object only then, and Google's client is only set up on the first number it is asked for. Off, nothing of
  * ML Kit is set up; the bot reads every number itself.
+ *
+ * Review round 3 (Nov 23): the public build removes ML Kit's start-up provider (MlKitInitProvider, see
+ * src/oss/AndroidManifest.xml), which otherwise set ML Kit up at every start of the app. So ML Kit is set up here
+ * ([starten]), right before Google's client – only when the setting is on.
  */
-class MlKitLeser : ZweitLeser {
+class MlKitLeser(private val ctx: Context) : ZweitLeser {
 
     companion object {
         /** Wait at most this long for an answer. */
@@ -35,10 +41,24 @@ class MlKitLeser : ZweitLeser {
 
         /** ML Kit needs text at least ~16 pixels high – small crops are scaled up. */
         private const val MIN_HOEHE = 64
+
+        @Volatile private var gestartet = false
+
+        /**
+         * Set ML Kit up once per app process. (If the start-up provider did it already – a build that keeps it – Google
+         * does nothing or says so; either way the client below works or reports why not.)
+         */
+        @Synchronized
+        private fun starten(ctx: Context) {
+            if (gestartet) return
+            runCatching { MlKit.initialize(ctx.applicationContext) }
+            gestartet = true
+        }
     }
 
     private val erkennerFaul: Lazy<TextRecognizer?> = lazy {
         try {
+            starten(ctx)
             TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         } catch (e: Throwable) {
             nichtDa(e)

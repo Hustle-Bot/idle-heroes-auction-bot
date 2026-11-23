@@ -64,6 +64,18 @@ jobs:
             exit 1
           fi
 
+      # Which providers, services and receivers the libraries merge into the app (Android starts every provider when the
+      # app starts). ML Kit's start-up provider is removed in app/src/oss/AndroidManifest.xml - it must not come back.
+      - name: Components of the debug APK (providers, services, receivers)
+        run: |
+          AAPT2=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2
+          "$AAPT2" dump xmltree --file AndroidManifest.xml app/build/outputs/apk/oss/debug/app-oss-debug.apk > manifest.txt
+          grep -E "provider|service|receiver" -A2 manifest.txt || true
+          if grep -q "MlKitInitProvider" manifest.txt; then
+            echo "::error::ML Kit's MlKitInitProvider is in the public app again (see app/src/oss/AndroidManifest.xml)"
+            exit 1
+          fi
+
   # Release, part 1: build the APK WITHOUT any secret. Gradle and its plugins never see the signing key.
   release-build:
     needs: test

@@ -9,6 +9,15 @@
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
 
     <application>
+        <!-- Review round 3 (Nov 23): Google ML Kit's start-up provider. A library merges it into the app, and Android
+             starts every provider at each start of the app - so ML Kit was set up (and could log its use) even with the
+             setting "Google text recognition" off. Removed here; MlKitLeser sets ML Kit up itself (MlKit.initialize),
+             only when the setting is on. The CI step "Components of the debug APK" prints what is left. -->
+        <provider
+            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+            android:authorities="${applicationId}.mlkitinitprovider"
+            tools:node="remove" />
+
         <!-- Sharing a report: read-only access for the app the player picks, only to the one ZIP file in
              cache/geteilt/ (res/xml/berichte_teilen.xml). Not exported. -->
         <provider

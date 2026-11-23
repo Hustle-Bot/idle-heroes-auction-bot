@@ -27,6 +27,7 @@ import android.widget.Toast
 import io.github.hustlebot.ihauctionbot.kern.Aktion
 import io.github.hustlebot.ihauctionbot.kern.AuktionsBot
 import io.github.hustlebot.ihauctionbot.kern.Bildschirm
+import io.github.hustlebot.ihauctionbot.kern.BuyoutFreigabe
 import io.github.hustlebot.ihauctionbot.kern.Ergebnis
 import io.github.hustlebot.ihauctionbot.kern.FensterZuordnung
 import io.github.hustlebot.ihauctionbot.kern.KnopfSichtbarkeit
@@ -61,6 +62,11 @@ import kotlin.system.exitProcess
  * learned from the game's own events, this app's screen tells by itself ([BotZustand.appBildschirmOffen]), every other
  * app window counts as another app ([FensterZuordnung]). Gestures, text input and screenshots only while a recent check
  * (at most [VORNE_FRISCH_MS] old) says the game is in front – otherwise nothing (fail closed).
+ *
+ * Review round 3 (Nov 23): the window list is also looked at right before every gesture ([vorneJetzt]); a gesture whose
+ * point lies under another window (another app's chat head, bubble or caller-ID strip, a notification, the keyboard) is
+ * skipped. Saved screenshots are black outside the game and under every other window ([Schwaerzen]). The game's window
+ * ids are only kept in memory.
  */
 class BotDienst : AccessibilityService() {
 
@@ -97,7 +103,10 @@ class BotDienst : AccessibilityService() {
         /** … and this often while no bot runs but the IH button is shown only over the game. */
         private const val VORNE_TAKT_RUHE_MS = 2_500L
 
-        /** A result of that check counts this long (after that: not known). */
+        /**
+         * A result of that check counts this long (after that: not known). Review round 3 (Nov 23): gestures check again
+         * right before they go out – this stays the outer limit (screenshots, text input).
+         */
         private const val VORNE_FRISCH_MS = 3_000L
 
         /**
@@ -117,6 +126,9 @@ class BotDienst : AccessibilityService() {
 
         /** After a crash or an update in the middle of a run: lock the screen only if the last step was at most this long ago. */
         private const val SPERREN_NACH_SCHRITT_MS = 120_000L
+
+        /** Review round 3 (Nov 23): file in which older versions saved the game's window ids – deleted at the start. */
+        private const val ALTE_FENSTER_DATEI = "fenster"
 
         /** The time of the last step is saved at most this often. */
         private const val SCHRITT_MERKEN_MS = 20_000L
@@ -514,9 +526,11 @@ class BotDienst : AccessibilityService() {
         if (zugestimmt) return
         zugestimmt = true
         BotZustand.log("Accessibility service connected")
-        // Review round 2 (Nov 23): the game's windows known from before (only if the phone has not restarted since),
-        // e.g. after a crash or an update of the app while the game stayed in front.
-        runCatching { zuordnung.uebernehmen(FensterSpeicher.laden(this), spielPakete) }
+        // Review round 3 (Nov 23): the game's window ids are no longer saved (whether the phone had restarted in between
+        // could only be guessed) – they are learned again from the game's events. The file of older versions goes.
+        runCatching { deleteSharedPreferences(ALTE_FENSTER_DATEI) }
+        // Leftovers of the flight recorder from before (crash in the middle of a run).
+        BerichtSender.resteLoeschen(this)
         knopfSicht = KnopfSichtbarkeit(
             eigenesPaket = packageName,
             spielPaket = SpielSpeicher.laden(this),
@@ -549,28 +563,55 @@ class BotDienst : AccessibilityService() {
         // by Android. The bot is off now, the shield gone, the game unprotected – so lock the screen once.
         // Review before publishing (Nov 22): only if the last step was less than 2 minutes ago AND Idle Heroes is in
         // front – not after a reboot or an update hours later.
+        // Review round 3 (Nov 23): the game's window is no longer remembered across the restart, so right after it the
+        // game is not known yet. The screen is locked as soon as Idle Heroes is seen in front again (its next event),
+        // but only until 2 minutes after the last step – if it is not seen by then, the screen is not locked.
         if (LaufSpeicher.neustartMitOffenemLauf(this)) {
-            val vorMs = System.currentTimeMillis() - LaufSpeicher.letzterSchritt(this)
+            val letzter = LaufSpeicher.letzterSchritt(this)
+            val vorMs = System.currentTimeMillis() - letzter
             if (vorMs !in 0L..SPERREN_NACH_SCHRITT_MS) {
                 BotZustand.log("A run was still open (last step more than 2 min ago) – the bot is off, the screen is not locked")
             } else {
-                vordergrundHolen { blick ->
-                    if (blick.lage == SpielVorne.Lage.SPIEL && !laufAktiv() && !handyGesperrt()) {
-                        BotZustand.log("The app was killed in the middle of a run (crash or Android) – the bot is off, locking the screen")
-                        BotZustand.letzteMeldung = "The bot was killed in the middle of a run – screen locked"
-                        BotZustand.melde()
-                        haupt.postDelayed({
-                            if (!laufAktiv()) {
-                                val ok = performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
-                                BotZustand.log(if (ok) "Screen turned off" else "Turning the screen off failed")
-                            }
-                        }, 500)
-                    } else {
-                        BotZustand.log("The app was killed in the middle of a run – the bot is off (Idle Heroes is not in front, the screen is not locked)")
-                    }
-                }
+                absturzSperreBis = letzter + SPERREN_NACH_SCHRITT_MS
+                BotZustand.log(
+                    "The app was killed in the middle of a run (crash or Android) – the bot is off; the screen is locked " +
+                        "as soon as Idle Heroes is seen in front (for about ${(SPERREN_NACH_SCHRITT_MS - vorMs).coerceAtLeast(0L) / 1000} s)",
+                )
+                haupt.postDelayed(absturzSperreAblauf, (absturzSperreBis - System.currentTimeMillis()).coerceAtLeast(0L))
             }
         }
+    }
+
+    /**
+     * Review round 3 (Nov 23): after a crash in the middle of a run, lock the screen until this time
+     * (System.currentTimeMillis) as soon as Idle Heroes is seen in front – 0 = nothing pending.
+     */
+    private var absturzSperreBis = 0L
+
+    /** The time for the lock after a crash is over without Idle Heroes being seen in front. */
+    private val absturzSperreAblauf = Runnable {
+        if (absturzSperreBis != 0L) {
+            absturzSperreBis = 0L
+            BotZustand.log("The app was killed in the middle of a run – the bot is off (Idle Heroes was not seen in front, the screen is not locked)")
+        }
+    }
+
+    /** Idle Heroes is in front (main thread): lock the screen once if a crash in the middle of a run asked for it. */
+    private fun absturzSperrePruefen() {
+        val bis = absturzSperreBis
+        if (bis == 0L) return
+        absturzSperreBis = 0L
+        haupt.removeCallbacks(absturzSperreAblauf)
+        if (System.currentTimeMillis() > bis || laufAktiv() || handyGesperrt()) return
+        BotZustand.log("The app was killed in the middle of a run (crash or Android) – Idle Heroes is in front, locking the screen")
+        BotZustand.letzteMeldung = "The bot was killed in the middle of a run – screen locked"
+        BotZustand.melde()
+        haupt.postDelayed({
+            if (!laufAktiv()) {
+                val ok = performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
+                BotZustand.log(if (ok) "Screen turned off" else "Turning the screen off failed")
+            }
+        }, 500)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -581,8 +622,8 @@ class BotDienst : AccessibilityService() {
         // Privacy review, round 2 (Nov 23): the window an event of the game comes from is the game's – that is how the
         // service knows the game's windows without asking any window what it is. Only the window id and the event's app
         // are used (and only apps of the allow-list count).
+        // Review round 3 (Nov 23): only in memory – the window ids are no longer saved.
         val neu = zuordnung.lernen(e.windowId, e.packageName?.toString(), spielPakete)
-        if (neu) runCatching { FensterSpeicher.merken(this, zuordnung.spielFenster()) }
         val typ = e.eventType
         if (!neu && typ != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && typ != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
         haupt.removeCallbacks(vordergrundAufgabe)
@@ -647,6 +688,8 @@ class BotDienst : AccessibilityService() {
         haupt.removeCallbacks(wachhund)
         haupt.removeCallbacks(vordergrundWache)
         haupt.removeCallbacks(vordergrundTakt)
+        haupt.removeCallbacks(absturzSperreAblauf)
+        absturzSperreBis = 0L
         zugestimmt = false
         runCatching { vordergrundFaden.shutdown() }
         // Review: if the accessibility service is turned off in the middle of a run (settings), that is not a crash –
@@ -1090,7 +1133,10 @@ class BotDienst : AccessibilityService() {
         vorneLage = blick.lage
         vorneLageUm = SystemClock.uptimeMillis()
         if (blick.unbekannt && !haupt.hasCallbacks(vordergrundAufgabe)) haupt.postDelayed(vordergrundAufgabe, NEUES_FENSTER_NOCHMAL_MS)
-        if (blick.lage == SpielVorne.Lage.SPIEL) spielVorneGesehen(sicht, blick.paket)
+        if (blick.lage == SpielVorne.Lage.SPIEL) {
+            spielVorneGesehen(sicht, blick.paket)
+            absturzSperrePruefen()
+        }
         if (knopfMussBleiben()) {
             // Bot running (or a hook holds the button): the button stays anyway – just check again once later.
             vordergrundVeraltet = true
@@ -1153,9 +1199,16 @@ class BotDienst : AccessibilityService() {
     /**
      * What Android's window list says: which app is in front ([lage], [paket] = the game's app, this app,
      * [SpielVorne.FREMDE_APP] or null – never another app's name), may a screenshot taken now be kept ([frei]), and did an
-     * app window appear just now that is not judged yet ([unbekannt]).
+     * app window appear just now that is not judged yet ([unbekannt]). Review round 3 (Nov 23): [liste] = the windows
+     * themselves (kind, position, size – null = Android gave none), to black out overlays and to skip taps under them.
      */
-    private class Blick(val lage: SpielVorne.Lage, val paket: String?, val frei: Boolean, val unbekannt: Boolean)
+    private class Blick(
+        val lage: SpielVorne.Lage,
+        val paket: String?,
+        val frei: Boolean,
+        val unbekannt: Boolean,
+        val liste: List<SpielVorne.Fenster>? = null,
+    )
 
     /**
      * Review before publishing (Nov 22): look at the windows (any thread). Review round 2 (Nov 23): only the window
@@ -1175,7 +1228,22 @@ class BotDienst : AccessibilityService() {
             paket = SpielVorne.vorneApp(liste)?.paket,
             frei = frei,
             unbekannt = liste.any { it.art == SpielVorne.Art.APP && it.paket == null },
+            liste = liste,
         )
+    }
+
+    /**
+     * Review round 3 (Nov 23): "which app is in front?" right now, in the main thread – right before every gesture (the
+     * window list is cheap; text input asks it in the main thread too). The result counts like the regular check (the
+     * 3 s rule stays the outer limit); everything else (shield, stop when leaving the game) follows right afterwards as
+     * usual. Failed → not known (fail closed).
+     */
+    private fun vorneJetzt(): Blick {
+        val blick = runCatching { umsehen() }.getOrElse { Blick(SpielVorne.Lage.UNKLAR, null, frei = false, unbekannt = false) }
+        vorneLage = blick.lage
+        vorneLageUm = SystemClock.uptimeMillis()
+        haupt.post { vordergrundAuswerten(blick) }
+        return blick
     }
 
     private fun freigabeMerken(frei: Boolean) {
@@ -1210,6 +1278,9 @@ class BotDienst : AccessibilityService() {
                 breite = r.width(),
                 hoehe = r.height(),
                 id = w.id,
+                // Review round 3 (Nov 23): where the window lies (to black out overlays, to skip taps under them).
+                links = r.left,
+                oben = r.top,
             )
         }
         return zuordnung.einordnen(roh, BotZustand.appBildschirmOffen, packageName, SystemClock.uptimeMillis())
@@ -1360,14 +1431,15 @@ class BotDienst : AccessibilityService() {
         // Review round 2 (Nov 23): Google's text recognition only with the setting on – otherwise it is not set up at all
         // (and closed if an earlier run used it); the core reads every number itself.
         if (einst.mlKit) {
-            leser.zweit = mlKit ?: MlKitLeser().also { mlKit = it }
+            leser.zweit = mlKit ?: MlKitLeser(applicationContext).also { mlKit = it }
         } else {
             leser.zweit = null
             mlKit?.schliessen()
             mlKit = null
         }
         val neu = AuktionsBot(
-            regeln = einst.regeln,
+            // Nov 23: where the build does not offer buyout, the bot gets the rules without max buyout (only this copy).
+            regeln = BuyoutFreigabe.regelnFuerLauf(einst.regeln, Variante.BUYOUT_FREIGEGEBEN),
             stopp = StoppBedingung(einst.zielKopien.takeIf { it > 0 }, einst.endeUm, einst.sgBudget),
             leser = leser,
             protokoll = BotZustand::log,
@@ -1377,7 +1449,9 @@ class BotDienst : AccessibilityService() {
             // Overnight: after "Lost connection" tap Confirm and carry on – at most 5 times per run.
             maxNeuverbindungen = 5,
             // Buyout (beta): only with the setting on and only for rules with a max buyout.
-            buyoutAn = einst.buyout,
+            // Nov 23: and only where the build offers it – the public app never buys out (not tested in the game yet),
+            // whatever the saved or restored settings say.
+            buyoutAn = BuyoutFreigabe.wirksam(Variante.BUYOUT_FREIGEGEBEN, einst.buyout),
         )
         LaufSpeicher.begonnen(this, offenerStart)
         gemerkterStartSg = offenerStart
@@ -1662,19 +1736,32 @@ class BotDienst : AccessibilityService() {
                 // read the screenshot at all (e.g. stop time reached), it is not saved either – otherwise it could be
                 // saved with the permission of the screenshot before (e.g. a secondary password window).
                 val schirm = leser.zuletzt.takeIf { leser.frisch(bildNr) }
+                // Review round 3 (Nov 23): what is black in every saved copy – everything outside the game and every other
+                // window over it (another app's chat head, bubble or caller-ID strip, the status bar). null = it cannot
+                // be said (e.g. the screenshot does not fit the window list) → nothing of this screenshot is kept.
+                val schwarz = if (frei && bild != null) {
+                    blick?.liste?.let { SpielVorne.schwaerzen(it, spielPakete, bild.width, bild.height) }
+                } else {
+                    null
+                }
                 // Review before publishing (Nov 22): and only while Idle Heroes is alone in front (no other app, no
                 // notification shade, no keyboard, never this app).
-                val erlaubt = bilderErlaubt(schirm?.ort) && frei
+                val erlaubt = bilderErlaubt(schirm?.ort) && frei && schwarz != null
+                // The image the recognition saw: the same pixels unless it had to be rotated – then the rectangles do not
+                // fit it, and it is only kept if there is nothing to black out.
+                val gesehen = leser.gesehen?.takeIf { g ->
+                    erlaubt && bild != null && (schwarz.isNullOrEmpty() || (g.breite == bild.width && g.hoehe == bild.height))
+                }
                 // Remember for the error report – never with the secondary password window, never shortly after the input.
                 // Flight recorder: EVERY analysed screenshot – without permission only the line, without the screenshot.
                 if (bot === b && bildNr >= 0) {
                     // Field test 1.9: plus learning images of unreadable numbers from exactly the screenshot seen.
                     BerichtSender.merke(
                         bild, schirm, erlaubt, ergebnis?.let { beschreibe(it) },
-                        if (erlaubt) leser.gesehen else null, b.erwartetesGebot, ergebnis,
+                        gesehen, b.erwartetesGebot, ergebnis, schwarz.orEmpty(),
                     )
                 }
-                diagnose(bild, farbraum, schirm, erlaubt)
+                diagnose(bild, farbraum, schirm, erlaubt, gesehen, schwarz.orEmpty())
                 haupt.post {
                     if (!erledigt.compareAndSet(false, true)) return@post
                     haupt.removeCallbacks(notfall)
@@ -1690,7 +1777,7 @@ class BotDienst : AccessibilityService() {
                         plane(1500)
                         return@post
                     }
-                    verarbeite(b, ergebnis, bild.takeIf { erlaubt })
+                    verarbeite(b, ergebnis, bild.takeIf { erlaubt }, schwarz.orEmpty())
                 }
             }
 
@@ -1740,9 +1827,17 @@ class BotDienst : AccessibilityService() {
      * Never while the secondary password window is open. Review before publishing (Nov 22): saved only inside the app
      * ([BildSpeicher]), and only if the game was alone in front ([erlaubt]).
      */
-    private fun diagnose(bild: Bitmap?, farbraum: String, s: Bildschirm?, erlaubt: Boolean) {
+    private fun diagnose(
+        bild: Bitmap?,
+        farbraum: String,
+        s: Bildschirm?,
+        erlaubt: Boolean,
+        gesehen: io.github.hustlebot.ihauctionbot.kern.bild.Bild?,
+        schwarz: List<io.github.hustlebot.ihauctionbot.kern.bild.Rechteck>,
+    ) {
         // Review: [s] comes from exactly this screenshot (null = not read), [erlaubt] = the screenshot may be saved.
-        val gesehen = leser.gesehen
+        // Review round 3 (Nov 23): [gesehen] = the image the recognition saw, only if it may be saved with [schwarz]
+        // blacked out (null = not).
         BotZustand.sehe = (s ?: leser.zuletzt)?.ort?.text
         val jetzt = System.currentTimeMillis()
         if (s == null || bild == null) return
@@ -1759,13 +1854,13 @@ class BotDienst : AccessibilityService() {
         if (!erlaubt) return
         if (!diagnoseGespeichert && gesehen != null) {
             diagnoseGespeichert = true
-            BildSpeicher.speichereUnsicher(this, alsBitmap(gesehen), "diagnostics at the start", sofort = true, vorsilbe = "diagnose")
+            BildSpeicher.speichereUnsicher(this, alsBitmap(gesehen), "diagnostics at the start", sofort = true, vorsilbe = "diagnose", schwarz = schwarz)
         }
         if (s.ort == Ort.UNBEKANNT) {
             val seit = unbekanntSeit ?: jetzt.also { unbekanntSeit = it }
             if (jetzt - seit >= 10_000 && !unbekanntBildGespeichert && gesehen != null) {
                 unbekanntBildGespeichert = true
-                BildSpeicher.speichereUnsicher(this, alsBitmap(gesehen), "nothing recognised for 10 seconds", sofort = true)
+                BildSpeicher.speichereUnsicher(this, alsBitmap(gesehen), "nothing recognised for 10 seconds", sofort = true, schwarz = schwarz)
             }
             BotZustand.unbekanntLange = jetzt - seit >= 10_000
         } else {
@@ -1778,7 +1873,12 @@ class BotDienst : AccessibilityService() {
     private fun alsBitmap(b: io.github.hustlebot.ihauctionbot.kern.bild.Bild): Bitmap =
         Bitmap.createBitmap(b.pixel, b.breite, b.hoehe, Bitmap.Config.ARGB_8888)
 
-    private fun verarbeite(b: AuktionsBot, ergebnis: Ergebnis, bild: Bitmap?) {
+    private fun verarbeite(
+        b: AuktionsBot,
+        ergebnis: Ergebnis,
+        bild: Bitmap?,
+        schwarz: List<io.github.hustlebot.ihauctionbot.kern.bild.Rechteck> = emptyList(),
+    ) {
         // Privacy: while the secondary password window is open, no screenshot may be taken or kept.
         if (leser.zuletzt?.ort == Ort.ZWEITPASSWORT) Variante.passwortSchutz(3_000)
         BotZustand.gekauft = b.gebote.gekaufteKopien
@@ -1848,7 +1948,11 @@ class BotDienst : AccessibilityService() {
                 // report at the stop right after), so that the window can be learned.
                 val buyoutFenster = ergebnis.grund.startsWith("Buyout:")
                 if (bild != null && bilderErlaubt(leser.zuletzt?.ort)) {
-                    BildSpeicher.speichereUnsicher(this, bild, ergebnis.grund, sofort = buyoutFenster, vorsilbe = if (buyoutFenster) "buyout" else "unsicher")
+                    BildSpeicher.speichereUnsicher(
+                        this, bild, ergebnis.grund, sofort = buyoutFenster, vorsilbe = if (buyoutFenster) "buyout" else "unsicher",
+                        // Review round 3 (Nov 23): outside the game and other apps' overlays black.
+                        schwarz = schwarz,
+                    )
                 }
                 plane(ergebnis.ms)
             }
@@ -2082,7 +2186,8 @@ class BotDienst : AccessibilityService() {
      * May the bot send a gesture (or type text) right now? (Never after a stop or during the pause.) Review before
      * publishing (Nov 22): also never while another app or this app is in front – the tap or the text would land there.
      * Review round 2 (Nov 23, fail closed): ONLY while a recent check (at most [VORNE_FRISCH_MS] old) says the game is in
-     * front – not when it is unclear. (The check runs every second during a run and after every screenshot.)
+     * front – not when it is unclear. (The check runs every second during a run and after every screenshot; review round
+     * 3: and right before every gesture, see [vorneJetzt].)
      */
     private fun darfGeste(b: AuktionsBot): Boolean =
         bot === b && BotZustand.lauf == BotZustand.Lauf.LAEUFT && spielSicherVorne()
@@ -2190,6 +2295,24 @@ class BotDienst : AccessibilityService() {
             // The core sees in the next screenshot that nothing happened, and plans again.
             if (knopfGehalten()) {
                 BotZustand.log("Finger on the IH button – gesture skipped ($grund)")
+                offenFertig()
+                ende()
+                return@los
+            }
+            // Review round 3 (Nov 23): look at the window list once more right before the gesture (not only once a
+            // second): is the game still in front, and is no other window on top where the finger goes down (another
+            // app's chat head, bubble or caller-ID strip, a notification, the keyboard)? Otherwise skip it – the core
+            // sees in the next screenshot that nothing happened. Which app such a window belongs to is never asked.
+            val blick = vorneJetzt()
+            if (!darfGeste(b)) {
+                gesteNichtVorne(b, grund)
+                offenFertig()
+                ende()
+                return@los
+            }
+            val liste = blick.liste
+            if (liste == null || startPunkte.any { (x, y) -> !SpielVorne.punktFrei(liste, spielPakete, x.toInt(), y.toInt()) }) {
+                BotZustand.log("Tap skipped – another window is on top ($grund)")
                 offenFertig()
                 ende()
                 return@los

@@ -26,6 +26,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import io.github.hustlebot.ihauctionbot.kern.BuyoutFreigabe
 import io.github.hustlebot.ihauctionbot.kern.KOPIE_TYPEN
 import io.github.hustlebot.ihauctionbot.kern.Suchregel
 import java.time.LocalTime
@@ -224,11 +225,18 @@ class EinstellungenActivity : Activity() {
                     zeigeRegeln()
                 }
             }
-            addView(buyoutBox, abstand(top = 10))
-            addView(text(
+            // Nov 23: only where the build offers buyout (the public app does not – not tested in the game yet). The box
+            // still exists hidden, so that saving keeps the saved value as it is.
+            val buyoutText = text(
                 "Instantly buys a copy when its Buyout Price is at or below the rule's max buyout. Counts toward the SG " +
                     "budget. Off = the bot only bids.",
-            ).apply { alpha = 0.8f })
+            ).apply { alpha = 0.8f }
+            if (!Variante.BUYOUT_FREIGEGEBEN) {
+                buyoutBox.visibility = View.GONE
+                buyoutText.visibility = View.GONE
+            }
+            addView(buyoutBox, abstand(top = 10))
+            addView(buyoutText)
         })
 
         // When to stop
@@ -338,7 +346,13 @@ class EinstellungenActivity : Activity() {
             dienstText = text("").apply { textSize = 16f }
             addView(dienstText)
             addView(grosserKnopf("Open accessibility settings") { bedienungshilfeOeffnen() })
-            addView(text("Android 15: if Android says \"restricted setting\", first open App info → ⋮ → \"Allow restricted settings\".").apply { alpha = 0.8f })
+            // Review round 3 (Nov 23): worded like GUIDE.md, section 1 (Android 13 or newer, not only 15).
+            addView(text(
+                "Android 13 or newer may say \"Restricted setting\": Android protects this setting because harmful apps " +
+                    "have abused it. Only allow it if the checksum and the certificate of the APK you installed matched " +
+                    "(see GUIDE.md, \"Install\"). Then open App info → ⋮ → \"Allow restricted settings\" and switch the " +
+                    "service on. To undo it: switch the service off and uninstall the app.",
+            ).apply { alpha = 0.8f })
             addView(grosserKnopf("Open app info") {
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
             })
@@ -365,22 +379,19 @@ class EinstellungenActivity : Activity() {
             "Secondary password",
             "The bot types it when the game asks for it; it is stored encrypted on this phone only and never appears in logs or reports.",
         ).apply {
-            val pwFeld = EditText(this@EinstellungenActivity).apply {
+            // Review round 3 (Nov 23): the saved password is never decrypted for this screen and never put back into the
+            // field (not even hidden). Saved: "Saved ✓" with Replace and Delete. "Show" only shows what is being typed
+            // right now; the field is saved with "Save" (no longer on every keystroke).
+            val ctx = this@EinstellungenActivity
+            val gespeichertZeile = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            val eingabe = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            val pwFeld = EditText(ctx).apply {
                 inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
                 textSize = 18f
                 hint = "Secondary password"
-                setText(Geheim.zweitpasswort(this@EinstellungenActivity) ?: "")
-                addTextChangedListener(object : TextWatcher {
-                    override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
-                    override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
-                    override fun afterTextChanged(s: Editable?) {
-                        Geheim.setzeZweitpasswort(this@EinstellungenActivity, s?.toString())
-                    }
-                })
             }
-            addView(pwFeld)
-            addView(CheckBox(this@EinstellungenActivity).apply {
-                text = "Show"
+            val zeigenBox = CheckBox(ctx).apply {
+                text = "Show what I type"
                 textSize = 16f
                 setOnCheckedChangeListener { _, an ->
                     // Review before publishing (Nov 22): while the password is readable, no screenshot or screen
@@ -394,7 +405,61 @@ class EinstellungenActivity : Activity() {
                         (if (an) InputType.TYPE_NUMBER_VARIATION_NORMAL else InputType.TYPE_NUMBER_VARIATION_PASSWORD)
                     pwFeld.setSelection(pwFeld.text.length)
                 }
-            })
+            }
+            val abbrechenKnopf = kleinerKnopf("Cancel") {}
+            /** [ersetzen] = the field for a new password is open although one is saved. */
+            fun zeigePasswort(ersetzen: Boolean) {
+                val da = Geheim.hatZweitpasswort(ctx)
+                val feldOffen = !da || ersetzen
+                gespeichertZeile.visibility = if (feldOffen) View.GONE else View.VISIBLE
+                eingabe.visibility = if (feldOffen) View.VISIBLE else View.GONE
+                abbrechenKnopf.visibility = if (da) View.VISIBLE else View.GONE
+                if (!ersetzen) {
+                    // Nothing typed stays in the field, and the screen may be captured again (FLAG_SECURE off).
+                    pwFeld.text.clear()
+                    zeigenBox.isChecked = false
+                }
+            }
+            gespeichertZeile.addView(text("Saved ✓").apply { textSize = 18f }, gewicht(1.4f))
+            gespeichertZeile.addView(kleinerKnopf("Replace") {
+                zeigePasswort(ersetzen = true)
+                pwFeld.requestFocus()
+            }, gewicht(1f))
+            gespeichertZeile.addView(kleinerKnopf("Delete") {
+                AlertDialog.Builder(ctx)
+                    .setMessage("Delete the saved secondary password? The bot then stops when the game asks for it.")
+                    .setPositiveButton("Delete") { _, _ ->
+                        Geheim.setzeZweitpasswort(ctx, null)
+                        zeigePasswort(ersetzen = false)
+                        Toast.makeText(ctx, "Secondary password deleted.", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }, gewicht(1f))
+            eingabe.addView(pwFeld)
+            eingabe.addView(zeigenBox)
+            val knoepfe = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            knoepfe.addView(kleinerKnopf("Save") {
+                val neu = pwFeld.text.toString()
+                if (neu.isEmpty()) {
+                    Toast.makeText(ctx, "Type the secondary password first.", Toast.LENGTH_SHORT).show()
+                    return@kleinerKnopf
+                }
+                Geheim.setzeZweitpasswort(ctx, neu)
+                val ok = Geheim.hatZweitpasswort(ctx)
+                zeigePasswort(ersetzen = false)
+                Toast.makeText(
+                    ctx,
+                    if (ok) "Secondary password saved." else "Could not save it – this phone's secure storage did not work.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }, gewicht(1f))
+            abbrechenKnopf.setOnClickListener { zeigePasswort(ersetzen = false) }
+            knoepfe.addView(abbrechenKnopf, gewicht(1f))
+            eingabe.addView(knoepfe)
+            addView(gespeichertZeile)
+            addView(eingabe)
+            zeigePasswort(ersetzen = false)
         })
 
         // Screen and battery
@@ -691,12 +756,19 @@ class EinstellungenActivity : Activity() {
             "(only into Idle Heroes);\n" +
             "• listens to the volume keys while the bot runs (emergency stop) – it never blocks or records any key;\n" +
             "• checks which app is in front (from Android's window list), so that it only works inside Idle Heroes – " +
-            "it never reads the content of other apps' windows.\n\n" +
+            "it never reads the content of other apps' windows;\n" +
+            // Review round 3 (Nov 23): the two other things the service can do.
+            "• can lock the screen at the end of a run (e.g. goal reached, end time, budget spent, or a stop because of a " +
+            "problem – like pressing the power button), and once if the app was killed in the middle of a run;\n" +
+            "• can put an invisible touch shield over the screen during a run, only if you choose it under \"Touching " +
+            "the screen\" (stop on touch or pocket mode – off by default). Pocket mode swallows your touches; way out: " +
+            "hold the IH button for 2 s, the power button, or volume down 3 times.\n\n" +
             "Google text recognition (Advanced settings → Reading numbers, now $mlKit): if on, numbers the bot cannot " +
             "read itself are also given to Google's text recognition (ML Kit, part of Google Play services, runs on the " +
             "phone); Google Play services may send usage statistics about it to Google. If off, it is not used at all.\n\n" +
             "What is stored on this phone: your settings, the secondary password (encrypted), a log, reports and some " +
-            "screenshots of the game. Reports and screenshots are deleted after 14 days; you can delete them at any time " +
+            "screenshots of the game (black outside the game and where another app's window lies over it). Reports, " +
+            "screenshots and log lines are deleted after 14 days; you can delete them at any time " +
             "under Advanced settings → Reports. " + daten + "\n\n" +
             "Please note: this app is unofficial and not made by the game's publisher. Using it may break the game's " +
             "Terms of Service, and your account could be banned. The bot spends your Starry Gems – set an SG budget. " +
@@ -788,13 +860,13 @@ class EinstellungenActivity : Activity() {
             }
             karte.addView(TextView(this).apply {
                 text = "${i + 1}.  ${regel.kopie}: up to ${regel.hoechstesGebot} SG" +
-                    (regel.buyoutMax?.let { " · buyout up to $it SG" } ?: "")
+                    BuyoutFreigabe.regelText(regel.buyoutMax, Variante.BUYOUT_FREIGEGEBEN)
                 textSize = 18f
                 typeface = Typeface.DEFAULT_BOLD
                 alpha = if (regel.aktiv) 1f else 0.5f
             })
             val wann = regel.maxRestzeitMin?.let { "only the last $it min" } ?: "any time left"
-            val buyoutAus = if (regel.buyoutMax != null && !einst.buyout) " · buyout is switched off" else ""
+            val buyoutAus = if (Variante.BUYOUT_FREIGEGEBEN && regel.buyoutMax != null && !einst.buyout) " · buyout is switched off" else ""
             karte.addView(text(
                 if (regel.aktiv) "on · filter ${regel.minPreis}–${regel.maxPreis} · $wann$buyoutAus" else "OFF – not searched for",
             ).apply { alpha = 0.8f })
@@ -884,8 +956,11 @@ class EinstellungenActivity : Activity() {
             addView(maxFeld)
             addView(text("Only bid if the auction ends within … minutes (empty = any time)"))
             addView(zeitFeld)
-            addView(text("Max buyout (SG): buy a copy outright up to this price (empty = no buyout; needs \"Buyout (beta)\")"))
-            addView(buyoutFeld)
+            // Nov 23: only where the build offers buyout; otherwise the rule's saved max buyout stays as it is.
+            if (Variante.BUYOUT_FREIGEGEBEN) {
+                addView(text("Max buyout (SG): buy a copy outright up to this price (empty = no buyout; needs \"Buyout (beta)\")"))
+                addView(buyoutFeld)
+            }
             addView(aktivBox)
         }
         AlertDialog.Builder(this)
@@ -898,7 +973,11 @@ class EinstellungenActivity : Activity() {
                     maxPreis = maxFeld.text.toString().toIntOrNull() ?: 0,
                     aktiv = aktivBox.isChecked,
                     maxRestzeitMin = zeitFeld.text.toString().trim().takeIf { it.isNotEmpty() }?.toIntOrNull(),
-                    buyoutMax = buyoutFeld.text.toString().trim().takeIf { it.isNotEmpty() }?.let { it.toIntOrNull() ?: 0 },
+                    buyoutMax = if (Variante.BUYOUT_FREIGEGEBEN) {
+                        buyoutFeld.text.toString().trim().takeIf { it.isNotEmpty() }?.let { it.toIntOrNull() ?: 0 }
+                    } else {
+                        alt.buyoutMax
+                    },
                 )
                 if (!neu.gueltig) {
                     Toast.makeText(

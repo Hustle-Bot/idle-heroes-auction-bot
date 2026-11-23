@@ -19,8 +19,6 @@ First public release of the open-source "oss" build.
 - Touch modes: Nothing / Stop on touch (beta) / Pocket mode (beta); emergency stop with volume down 3x.
 - Auto-reconnect after "Lost connection": waits 60 s, taps Confirm, waits up to 3 min for the auction house, then sets filter
   and sorting again (max 5 per run; the 6th loss stops the bot).
-- Optional buyout with a per-rule maximum price, off by default, counts toward the SG budget and the goal. Stops (tapping
-  nothing) if an unknown confirmation window appears after "Buyout Price".
 - Simple main screen with big START / STOP; power saving (dims the screen, checks less often while waiting); warnings
   before a start (charger, battery optimization, Do Not Disturb); pause when the phone is hotter than 45 degrees C, stop below
   15 % battery when not charging.
@@ -30,5 +28,9 @@ First public release of the open-source "oss" build.
   anything; the service is limited to Idle Heroes (`com.droidhang.ad`); screenshots are kept only while the game is alone
   in front and never go to the gallery; volume keys are watched only during a run; no key codes or other apps' names in
   the log; new installs start with a 500 SG budget.
+- Instant buyout is prepared but not offered until it has been tested in the real game: this version only bids.
+- Saved screenshots are blacked out outside the game; no tap under another app's window; the window check runs before
+  every gesture; log lines older than 14 days are removed; "Share log only"; the saved secondary password is never shown
+  again (Saved ✓ / Replace / Delete); warning when the screen is not about 20:9.
 - **No internet permission**, no self-update, no uploads, no screen recording.
 - English UI and documentation.

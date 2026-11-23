@@ -42,8 +42,8 @@ computer, see below). The public build has **no internet permission at all**.
 - Works only while **Idle Heroes (Google Play version, `com.droidhang.ad`) is in front**; when another app comes to the
   front it taps nothing and stops after about 2 seconds.
 - Can **reconnect** after a "Lost connection" message (at most 5 times per run).
-- Optional **buyout** mode: **off by default**; you set a maximum buyout price per rule, and it counts toward your SG budget.
-  See the risks in [GUIDE.md](GUIDE.md).
+- **Only bids** - instant **buyout** is prepared in the code but not offered yet: it comes after it has been tested in
+  the real game (see [GUIDE.md](GUIDE.md#7-buyout-coming-after-testing)).
 - A simple main screen with big **START** / **STOP**, **Power saving** and **overnight checks** (warns before a start if
   the phone is not charging, pauses when it gets too hot, stops when the battery is low).
 - **Reports** for troubleshooting are saved on your phone (deleted after 14 days, or at once with a button); you decide if

@@ -10,7 +10,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Shared state for the floating button, the settings and the bot.
- * Plus the log (last lines in memory, everything in protokoll.txt).
+ * Plus the log (last lines in memory, everything in protokoll.txt – review round 3: no line older than 14 days).
  */
 object BotZustand {
 
@@ -97,8 +97,39 @@ object BotZustand {
     /** Review round 2 (Nov 23): log lines also go to Android's logcat – only in a debuggable build (emulator test). */
     @Volatile private var logcat = false
 
+    // ---------------- Log file: at most 14 days (review round 3, Nov 23) ----------------
+    //
+    // The lines only carry the time of day. So protokoll.txt is started anew every [PROTOKOLL_TEIL_MS] (7 days, or at
+    // [PROTOKOLL_MAX_BYTES]); when it was started is in [PROTOKOLL_BEGINN]. The old part becomes protokoll.alt.txt and is
+    // deleted [PROTOKOLL_TEIL_MS] after its last line. So no line in the log is older than 14 days. A log of an older
+    // version (no start time known) is deleted once – the reports keep their own copy of the log.
+
+    private const val PROTOKOLL = "protokoll.txt"
+    private const val PROTOKOLL_ALT = "protokoll.alt.txt"
+    private const val PROTOKOLL_BEGINN = "protokoll.beginn"
+    private const val PROTOKOLL_TEIL_MS = 7L * 24 * 60 * 60 * 1000
+    private const val PROTOKOLL_MAX_BYTES = 2_000_000L
+
+    /** Old parts are looked at this often while the app runs (and at every start). */
+    private const val PROTOKOLL_PRUEFEN_MS = 60L * 60 * 1000
+
+    /** Guards the log files (rotating and writing). */
+    private val dateiSperre = Any()
+
+    /** When protokoll.txt was started (System.currentTimeMillis; 0 = not known). Only with synchronized(dateiSperre). */
+    private var protokollBeginn = 0L
+    private var protokollGeprueft = 0L
+
     fun init(ctx: Context) {
-        if (protokollDatei == null) protokollDatei = File(ctx.applicationContext.filesDir, "protokoll.txt")
+        if (protokollDatei == null) {
+            val datei = File(ctx.applicationContext.filesDir, PROTOKOLL)
+            synchronized(dateiSperre) {
+                protokollBeginn = runCatching { File(datei.parentFile, PROTOKOLL_BEGINN).readText().trim().toLong() }.getOrDefault(0L)
+                protokollDatei = datei
+                protokollGeprueft = System.currentTimeMillis()
+                runCatching { protokollPruefen(datei, protokollGeprueft) }
+            }
+        }
         logcat = (ctx.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
 
@@ -111,12 +142,52 @@ object BotZustand {
         if (logcat) Log.i("IHBot", text)
         protokollDatei?.let { datei ->
             runCatching {
-                if (datei.length() > 2_000_000) datei.renameTo(File(datei.parentFile, "protokoll.alt.txt"))
-                datei.appendText(zeile + "\n")
+                synchronized(dateiSperre) {
+                    val jetzt = System.currentTimeMillis()
+                    if (jetzt - protokollGeprueft !in 0L until PROTOKOLL_PRUEFEN_MS || datei.length() > PROTOKOLL_MAX_BYTES) {
+                        protokollGeprueft = jetzt
+                        protokollPruefen(datei, jetzt)
+                    }
+                    if (datei.length() == 0L) {
+                        // A new log file begins: remember when.
+                        protokollBeginn = jetzt
+                        File(datei.parentFile, PROTOKOLL_BEGINN).writeText(jetzt.toString())
+                    }
+                    datei.appendText(zeile + "\n")
+                }
             }
         }
         letzteMeldung = text
         melde()
+    }
+
+    /**
+     * Review round 3 (Nov 23): delete log lines older than 14 days (see above). Called when the app is opened
+     * ([BerichtSender.alteLoeschen]); also happens by itself at the start and about once an hour while the app writes.
+     */
+    fun protokollAufraeumen() {
+        val datei = protokollDatei ?: return
+        synchronized(dateiSperre) {
+            protokollGeprueft = System.currentTimeMillis()
+            protokollPruefen(datei, protokollGeprueft)
+        }
+    }
+
+    /** Start the log anew if it is too old or too big; delete old parts. Only with synchronized(dateiSperre). */
+    private fun protokollPruefen(datei: File, jetzt: Long) {
+        val ordner = datei.parentFile ?: return
+        val alt = File(ordner, PROTOKOLL_ALT)
+        val beginn = protokollBeginn
+        if (beginn <= 0L) {
+            // Written by an older version: the dates of its lines are not known – it goes (the reports keep theirs).
+            datei.delete()
+            alt.delete()
+        } else if (datei.length() > 0L && (jetzt - beginn !in 0L until PROTOKOLL_TEIL_MS || datei.length() > PROTOKOLL_MAX_BYTES)) {
+            alt.delete()
+            if (!datei.renameTo(alt)) datei.delete()
+        }
+        // The old part: its last line was written when it was last changed.
+        if (alt.exists() && jetzt - alt.lastModified() !in 0L until PROTOKOLL_TEIL_MS) alt.delete()
     }
 
     fun letzteZeilen(anzahl: Int = 80): List<String> = synchronized(zeilen) { zeilen.toList().takeLast(anzahl) }
@@ -125,11 +196,30 @@ object BotZustand {
     fun protokollLoeschen() {
         synchronized(zeilen) { zeilen.clear() }
         protokollDatei?.let { datei ->
-            runCatching { datei.delete() }
-            runCatching { File(datei.parentFile, "protokoll.alt.txt").delete() }
+            synchronized(dateiSperre) {
+                runCatching { datei.delete() }
+                runCatching { File(datei.parentFile, PROTOKOLL_ALT).delete() }
+                runCatching { File(datei.parentFile, PROTOKOLL_BEGINN).delete() }
+                // The next line starts a new log file (and sets its start time).
+                protokollBeginn = 0L
+            }
         }
         letzteMeldung = ""
         melde()
+    }
+
+    /**
+     * Review round 3 (Nov 23): the whole log (old part and current file, at most the last ~1.5 MB, starting at a full
+     * line) – for "Share log only".
+     */
+    fun protokollGanz(): String {
+        val datei = protokollDatei ?: return letzteZeilen(300).joinToString("\n")
+        return runCatching {
+            val text = listOf(File(datei.parentFile, PROTOKOLL_ALT), datei)
+                .filter { it.isFile }
+                .joinToString("") { it.readText() }
+            if (text.length <= 1_500_000) text else text.takeLast(1_500_000).substringAfter('\n')
+        }.getOrElse { letzteZeilen(300).joinToString("\n") }
     }
 
     /** How long the log file is right now (bookmark for the error report). */

@@ -26,6 +26,15 @@ object Variante {
      */
     const val MLKIT_STANDARD = false
 
+    // ---------------- Buyout ----------------
+
+    /**
+     * Nov 23: buying out has not been tested in the real game yet – this app does not offer it. No "Buyout (beta)" switch,
+     * no "Max buyout (SG)" field, the bot never buys out (even if saved or restored settings say so). Saved max buyouts
+     * stay in the settings untouched.
+     */
+    const val BUYOUT_FREIGEGEBEN = false
+
     // ---------------- Battery ----------------
 
     /**
